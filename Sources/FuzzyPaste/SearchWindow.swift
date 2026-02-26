@@ -9,6 +9,51 @@ private final class NonFocusTableView: NSTableView {
     override var acceptsFirstResponder: Bool { false }
 }
 
+/// キーボードキー風バッジ。NSTextField を使わず直接描画することで
+/// テキストを正確に中央揃えする。
+@MainActor
+private final class KeyBadgeView: NSView {
+    private let text: String
+    private let attrs: [NSAttributedString.Key: Any]
+    private static let horizontalPadding: CGFloat = 5
+    private static let verticalPadding: CGFloat = 2
+
+    init(text: String) {
+        self.text = text
+        self.attrs = [
+            .font: NSFont.systemFont(ofSize: SearchWindow.Layout.hintBadgeFontSize, weight: .medium),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.08).cgColor
+        layer?.borderColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.3).cgColor
+        layer?.borderWidth = 0.5
+        layer?.cornerRadius = 3.5
+
+        let size = (text as NSString).size(withAttributes: attrs)
+        let width = max(ceil(size.width) + Self.horizontalPadding * 2, 18)
+        let height = ceil(size.height) + Self.verticalPadding * 2
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: width),
+            heightAnchor.constraint(equalToConstant: height),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let size = (text as NSString).size(withAttributes: attrs)
+        let point = NSPoint(
+            x: (bounds.width - size.width) / 2,
+            y: (bounds.height - size.height) / 2
+        )
+        (text as NSString).draw(at: point, withAttributes: attrs)
+    }
+}
+
 /// ポップアップ検索ウィンドウ。Cmd+Shift+V で表示される。
 ///
 /// 構成:
@@ -34,17 +79,19 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     /// レイアウト定数。デザイン調整はここを変えるだけでOK。
-    private enum Layout {
+    fileprivate enum Layout {
         static let windowSize = NSSize(width: 480, height: 360)
         static let cornerRadius: CGFloat = 12
         static let searchFontSize: CGFloat = 18
         static let cellFontSize: CGFloat = 13
-        static let hintFontSize: CGFloat = 11
+        static let hintBadgeFontSize: CGFloat = 10
+        static let hintLabelFontSize: CGFloat = 11
         static let rowHeight: CGFloat = 36
         static let windowPadding: CGFloat = 12
         static let cellPadding: CGFloat = 16
         static let searchHeight: CGFloat = 36
-        static let hintBarHeight: CGFloat = 28
+        static let hintBarHeight: CGFloat = 32
+        static let hintGroupSpacing: CGFloat = 16
         static let iconSize: CGFloat = 20
         static let sectionGap: CGFloat = 8
         static let iconInset: CGFloat = 4
@@ -195,11 +242,23 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         hintSeparator.translatesAutoresizingMaskIntoConstraints = false
         hintBar.addSubview(hintSeparator)
 
-        let hintLabel = NSTextField(labelWithString: "⏎ Paste    ⌘C Copy    esc Close")
-        hintLabel.font = .systemFont(ofSize: Layout.hintFontSize)
-        hintLabel.textColor = .tertiaryLabelColor
-        hintLabel.translatesAutoresizingMaskIntoConstraints = false
-        hintBar.addSubview(hintLabel)
+        // キーバッジ + ラベルのペアを横並びに配置
+        let shortcuts: [(key: String, label: String)] = [
+            ("↩", "Paste"),
+            ("⌘C", "Copy"),
+            ("esc", "Close"),
+        ]
+        let stackView = NSStackView()
+        stackView.orientation = .horizontal
+        stackView.spacing = Layout.hintGroupSpacing
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+
+        for shortcut in shortcuts {
+            let group = makeHintGroup(key: shortcut.key, label: shortcut.label)
+            stackView.addArrangedSubview(group)
+        }
+
+        hintBar.addSubview(stackView)
 
         NSLayoutConstraint.activate([
             scrollView.bottomAnchor.constraint(equalTo: hintBar.topAnchor),
@@ -213,9 +272,26 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             hintSeparator.leadingAnchor.constraint(equalTo: hintBar.leadingAnchor),
             hintSeparator.trailingAnchor.constraint(equalTo: hintBar.trailingAnchor),
 
-            hintLabel.centerYAnchor.constraint(equalTo: hintBar.centerYAnchor),
-            hintLabel.centerXAnchor.constraint(equalTo: hintBar.centerXAnchor),
+            stackView.centerYAnchor.constraint(equalTo: hintBar.centerYAnchor),
+            stackView.centerXAnchor.constraint(equalTo: hintBar.centerXAnchor),
         ])
+    }
+
+    /// キーバッジ＋アクションラベルの1組を生成。
+    /// キーボードキー風の繊細なバッジ + 薄いラベルの組み合わせ。
+    private func makeHintGroup(key: String, label: String) -> NSView {
+        let badge = KeyBadgeView(text: key)
+        badge.translatesAutoresizingMaskIntoConstraints = false
+
+        let actionLabel = NSTextField(labelWithString: label)
+        actionLabel.font = .systemFont(ofSize: Layout.hintLabelFontSize, weight: .regular)
+        actionLabel.textColor = .tertiaryLabelColor
+        actionLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let group = NSStackView(views: [badge, actionLabel])
+        group.orientation = .horizontal
+        group.spacing = 3
+        return group
     }
 
     // MARK: - Show / Dismiss
