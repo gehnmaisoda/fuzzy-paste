@@ -19,7 +19,7 @@ private final class NonFocusTableView: NSTableView {
 /// │ 履歴アイテム2             │
 /// │ ...                      │
 /// ├──────────────────────────┤
-/// │ ⏎ Paste  ⌘C Copy  esc   │ ← ショートカットヒント
+/// │ ⏎ ペースト ⌘C コピー ⌘E │ ← ショートカットヒント
 /// └──────────────────────────┘
 ///
 /// NSPanel を使用することで、他アプリの上にフローティング表示できる。
@@ -31,6 +31,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private enum KeyCode {
         static let c: UInt16 = 8
         static let a: UInt16 = 0
+        static let e: UInt16 = 14
     }
 
     /// レイアウト定数。デザイン調整はここを変えるだけでOK。
@@ -66,6 +67,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     var onPaste: ((String, NSRunningApplication?) -> Void)?
     /// Cmd+C で選択 → クリップボードにコピーのみ
     var onCopy: ((String) -> Void)?
+    /// Cmd+E でスニペット管理ウィンドウを開く
+    var onOpenSnippetManager: (() -> Void)?
 
     init() {
         super.init(
@@ -196,7 +199,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         hintSeparator.translatesAutoresizingMaskIntoConstraints = false
         hintBar.addSubview(hintSeparator)
 
-        let hintLabel = NSTextField(labelWithString: "⏎ ペースト    ⌘C コピー    esc 閉じる")
+        let hintLabel = NSTextField(labelWithString: "⏎ ペースト    ⌘C コピー    ⌘E スニペット管理")
         hintLabel.font = .systemFont(ofSize: Layout.hintFontSize)
         hintLabel.textColor = .tertiaryLabelColor
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -286,6 +289,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         // Cmd+C → 選択中のアイテムをクリップボードにコピー
         if event.keyCode == KeyCode.c && flags == .command {
             copyCurrentItem()
+            return true
+        }
+
+        // Cmd+E → スニペット管理ウィンドウを開く
+        // resignKey → dismiss で previousApp?.activate() が走らないよう先に nil にする
+        if event.keyCode == KeyCode.e && flags == .command {
+            previousApp = nil
+            orderOut(nil)
+            onOpenSnippetManager?()
             return true
         }
 

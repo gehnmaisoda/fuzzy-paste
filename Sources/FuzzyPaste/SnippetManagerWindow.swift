@@ -14,16 +14,17 @@ private final class PlaceholderLabel: NSTextField {
 /// ┌────────────────────────────────────────────────────────────────┐
 /// │  ★ スニペット管理                                              │
 /// │  登録したスニペットは検索結果に表示されます                        │
-/// │  ┌──────────────────┐  ┌──────────────────────────────────┐   │
-/// │  │ ★ メールテンプレ  │  │ スニペット名                      │   │
-/// │  │   user@exampl... │  │ ┌──────────────────────────────┐ │   │
-/// │  ├──────────────────┤  │ │ メールテンプレート            │ │   │
-/// │  │ ★ 住所           │  │ └──────────────────────────────┘ │   │
-/// │  │   東京都渋谷区... │  │ 内容                             │   │
-/// │  └──────────────────┘  │ ┌──────────────────────────────┐ │   │
-/// │  [＋ 追加]      [削除]  │ │ user@example.com is my ...   │ │   │
-/// │                        │ └──────────────────────────────┘ │   │
-/// │                        └──────────────────────────────────┘   │
+/// │                                                                │
+/// │  スニペット一覧             スニペット名                         │
+/// │  ┌──────────────────┐      ┌────────────────────────────────┐  │
+/// │  │ ★ メールテンプレ  │      │ メールテンプレート              │  │
+/// │  │   user@exampl... │      └────────────────────────────────┘  │
+/// │  ├──────────────────┤      内容                                │
+/// │  │ ★ 住所           │      ┌────────────────────────────────┐  │
+/// │  │   東京都渋谷区... │      │ user@example.com is my ...     │  │
+/// │  ├──────────────────┤      │                                │  │
+/// │  │ [＋ 追加]  [削除] │      └────────────────────────────────┘  │
+/// │  └──────────────────┘                                          │
 /// └────────────────────────────────────────────────────────────────┘
 @MainActor
 final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate, NSTextViewDelegate {
@@ -31,7 +32,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: - 定数
 
     private enum Layout {
-        static let windowSize = NSSize(width: 700, height: 480)
+        static let windowSize = NSSize(width: 840, height: 576)
         static let cornerRadius: CGFloat = 14
         static let padding: CGFloat = 24
         static let listWidth: CGFloat = 240
@@ -54,6 +55,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         static let w: UInt16 = 13
         static let n: UInt16 = 45
         static let a: UInt16 = 0
+        static let delete: UInt16 = 51
     }
 
     /// セル内の 2 つの NSTextField を識別するタグ
@@ -171,7 +173,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: 左パネル（リスト + ボタン）
 
     private func buildLeftPanel(in panel: NSView) {
-        // ── テーブルの角丸ラッパー ──
+        // ── セクションラベル（右パネルの「スニペット名」ラベルと Y を揃える） ──
+        let listLabel = makeLabel("スニペット一覧")
+        panel.addSubview(listLabel)
+
+        // ── テーブルの角丸ラッパー（テーブル + セパレータ + ボタンを内包） ──
         let tableWrapper = NSView()
         tableWrapper.wantsLayer = true
         tableWrapper.layer?.cornerRadius = 8
@@ -201,6 +207,32 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         tableScrollView.borderType = .noBorder
         tableScrollView.translatesAutoresizingMaskIntoConstraints = false
         tableWrapper.addSubview(tableScrollView)
+
+        // ── セパレータ（テーブルとボタンバーの境界） ──
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        tableWrapper.addSubview(separator)
+
+        // ── ボタン（ラッパー内のツールバーとして配置） ──
+        addButton.title = "＋ 追加"
+        addButton.bezelStyle = .rounded
+        addButton.controlSize = .regular
+        addButton.font = .systemFont(ofSize: 12, weight: .medium)
+        addButton.target = self
+        addButton.action = #selector(addClicked)
+        addButton.translatesAutoresizingMaskIntoConstraints = false
+        tableWrapper.addSubview(addButton)
+
+        removeButton.title = "削除"
+        removeButton.bezelStyle = .rounded
+        removeButton.controlSize = .regular
+        removeButton.font = .systemFont(ofSize: 12)
+        removeButton.target = self
+        removeButton.action = #selector(removeClicked)
+        removeButton.isEnabled = false
+        removeButton.translatesAutoresizingMaskIntoConstraints = false
+        tableWrapper.addSubview(removeButton)
 
         // ── 空状態メッセージ ──
         let emptyStr = NSMutableAttributedString()
@@ -232,46 +264,33 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         emptyStateLabel.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(emptyStateLabel)
 
-        // ── ボタン ──
-        addButton.title = "＋ 追加"
-        addButton.bezelStyle = .rounded
-        addButton.controlSize = .regular
-        addButton.font = .systemFont(ofSize: 12, weight: .medium)
-        addButton.target = self
-        addButton.action = #selector(addClicked)
-        addButton.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(addButton)
-
-        removeButton.title = "削除"
-        removeButton.bezelStyle = .rounded
-        removeButton.controlSize = .regular
-        removeButton.font = .systemFont(ofSize: 12)
-        removeButton.target = self
-        removeButton.action = #selector(removeClicked)
-        removeButton.isEnabled = false
-        removeButton.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(removeButton)
-
         NSLayoutConstraint.activate([
-            tableWrapper.topAnchor.constraint(equalTo: panel.topAnchor),
+            listLabel.topAnchor.constraint(equalTo: panel.topAnchor),
+            listLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+
+            tableWrapper.topAnchor.constraint(equalTo: listLabel.bottomAnchor, constant: Layout.spacing),
             tableWrapper.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
             tableWrapper.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
-            tableWrapper.bottomAnchor.constraint(equalTo: addButton.topAnchor, constant: -8),
+            tableWrapper.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
 
             tableScrollView.topAnchor.constraint(equalTo: tableWrapper.topAnchor),
             tableScrollView.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor),
             tableScrollView.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor),
-            tableScrollView.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor),
+            tableScrollView.bottomAnchor.constraint(equalTo: separator.topAnchor),
 
-            emptyStateLabel.centerXAnchor.constraint(equalTo: tableWrapper.centerXAnchor),
-            emptyStateLabel.centerYAnchor.constraint(equalTo: tableWrapper.centerYAnchor),
-            emptyStateLabel.widthAnchor.constraint(lessThanOrEqualTo: tableWrapper.widthAnchor, constant: -16),
+            separator.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: addButton.topAnchor, constant: -10),
 
-            addButton.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-            addButton.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+            addButton.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor, constant: 8),
+            addButton.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor, constant: -10),
 
-            removeButton.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
-            removeButton.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+            removeButton.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor, constant: -8),
+            removeButton.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor, constant: -10),
+
+            emptyStateLabel.centerXAnchor.constraint(equalTo: tableScrollView.centerXAnchor),
+            emptyStateLabel.centerYAnchor.constraint(equalTo: tableScrollView.centerYAnchor),
+            emptyStateLabel.widthAnchor.constraint(lessThanOrEqualTo: tableScrollView.widthAnchor, constant: -16),
         ])
     }
 
@@ -421,6 +440,13 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         if event.keyCode == KeyCode.n && flags == .command {
             addClicked()
             return true
+        }
+        // Cmd+Delete: 選択中のスニペットを削除（テキスト編集中は標準の「行頭まで削除」を優先）
+        if event.keyCode == KeyCode.delete && flags == .command {
+            if !(firstResponder is NSTextView) {
+                removeClicked()
+                return true
+            }
         }
         // Cmd+A: ファーストレスポンダ（テキストフィールド/ビュー）に全選択を委譲
         if event.keyCode == KeyCode.a && flags == .command {
@@ -577,6 +603,16 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         saveCurrentEdits()
     }
 
+    /// テキスト変更前にプレースホルダーを即座に制御する（IME 入力時の重なり防止）
+    func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        if let str = replacementString {
+            let currentLength = (textView.string as NSString).length
+            let willBeEmpty = currentLength - affectedCharRange.length + (str as NSString).length == 0
+            contentPlaceholder.isHidden = !willBeEmpty
+        }
+        return true
+    }
+
     /// Shift+Tab で内容フィールドからタイトルフィールドにフォーカスを戻す
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.insertBacktab(_:)) {
@@ -611,7 +647,6 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         alert.alertStyle = .warning
         alert.addButton(withTitle: "削除")
         alert.addButton(withTitle: "キャンセル")
-        alert.buttons.first?.hasDestructiveAction = true
 
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
