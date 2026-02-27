@@ -11,20 +11,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let historyStore = HistoryStore()
     private let hotkeyManager = HotkeyManager()
     private let snippetStore = SnippetStore()
+    private let imageStore = ImageStore()
     private var searchWindow: SearchWindow?
     private var snippetManagerWindow: SnippetManagerWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
+        setupImageStore()
         startClipboardMonitor()
         setupHotkey()
+    }
+
+    // MARK: - 画像ストア
+
+    private func setupImageStore() {
+        historyStore.onImageDelete = { [weak self] fileName in
+            self?.imageStore.delete(fileName: fileName)
+        }
     }
 
     // MARK: - クリップボード監視
 
     private func startClipboardMonitor() {
-        clipboardMonitor.onNewClip = { [weak self] text in
-            self?.historyStore.add(text)
+        clipboardMonitor.onNewClip = { [weak self] content in
+            guard let self else { return }
+            switch content {
+            case .text(let text):
+                self.historyStore.add(text)
+            case .imageData(let data, let utType, let originalFileName):
+                if let metadata = self.imageStore.save(data: data, utType: utType, originalFileName: originalFileName) {
+                    self.historyStore.addImage(metadata)
+                }
+            }
         }
         clipboardMonitor.start()
     }
@@ -51,19 +69,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ウィンドウは一度作ったら再利用する（毎回生成しない）
         let window = searchWindow ?? createSearchWindow()
         searchWindow = window
-        window.show(clips: historyStore.items, snippets: snippetStore.items)
+        window.show(clips: historyStore.items, snippets: snippetStore.items, imageStore: imageStore)
     }
 
     private func createSearchWindow() -> SearchWindow {
         let window = SearchWindow()
-        window.onPaste = { [weak self] text, previousApp in
-            // 自分のペーストを履歴に重複登録しないよう、モニターに無視指示
-            self?.clipboardMonitor.ignoreNext(text)
-            PasteHelper.paste(text, previousApp: previousApp)
+        window.onPaste = { [weak self] item, previousApp in
+            guard let self else { return }
+            self.clipboardMonitor.ignoreNextChange()
+            switch item.content {
+            case .text(let text):
+                PasteHelper.paste(text, previousApp: previousApp)
+            case .image(let meta):
+                let url = self.imageStore.imageURL(for: meta.fileName)
+                PasteHelper.pasteImage(at: url, previousApp: previousApp)
+            }
         }
-        window.onCopy = { [weak self] text in
-            self?.clipboardMonitor.ignoreNext(text)
-            PasteHelper.copyToClipboard(text)
+        window.onCopy = { [weak self] item in
+            guard let self else { return }
+            self.clipboardMonitor.ignoreNextChange()
+            switch item.content {
+            case .text(let text):
+                PasteHelper.copyToClipboard(text)
+            case .image(let meta):
+                let url = self.imageStore.imageURL(for: meta.fileName)
+                PasteHelper.copyImageToClipboard(at: url)
+            }
         }
         window.onOpenSnippetManager = { [weak self] in
             self?.showSnippetManager()

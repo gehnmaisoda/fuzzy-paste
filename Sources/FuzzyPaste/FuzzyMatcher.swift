@@ -45,7 +45,8 @@ enum FuzzyMatcher {
         if query.isEmpty { return items }
         return items
             .compactMap { item -> (item: ClipItem, score: Int)? in
-                guard let score = match(query: query, target: item.text) else { return nil }
+                guard let text = item.text,
+                      let score = match(query: query, target: text) else { return nil }
                 return (item, score)
             }
             .sorted { $0.score > $1.score }
@@ -55,6 +56,7 @@ enum FuzzyMatcher {
     /// クエリでクリップ履歴とスニペットを統合検索し、スコア順で返す。
     /// スニペットは title と content の両方で検索し、高い方のスコアを採用。
     /// クエリが空の場合、クリップ履歴のみを表示（スニペットは検索時のみ混合）。
+    /// クエリがある場合、画像アイテムはスキップ（テキスト検索不可）。
     static func filterMixed(query: String, clips: [ClipItem], snippets: [SnippetItem]) -> [SearchResultItem] {
         if query.isEmpty {
             return clips.map { SearchResultItem.clip($0) }
@@ -63,8 +65,17 @@ enum FuzzyMatcher {
         var scored: [(item: SearchResultItem, score: Int)] = []
 
         for clip in clips {
-            if let score = match(query: query, target: clip.text) {
-                scored.append((.clip(clip), score))
+            switch clip.content {
+            case .text(let text):
+                if let score = match(query: query, target: text) {
+                    scored.append((.clip(clip), score))
+                }
+            case .image(let meta):
+                // 画像は originalFileName があれば検索対象にする
+                if let name = meta.originalFileName,
+                   let score = match(query: query, target: name) {
+                    scored.append((.clip(clip), score))
+                }
             }
         }
 
