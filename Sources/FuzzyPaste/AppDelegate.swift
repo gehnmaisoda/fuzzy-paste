@@ -65,6 +65,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.clipboardMonitor.ignoreNext(text)
             PasteHelper.copyToClipboard(text)
         }
+        window.onOpenSnippetManager = { [weak self] in
+            self?.showSnippetManager()
+        }
         return window
     }
 
