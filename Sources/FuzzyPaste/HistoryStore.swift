@@ -2,7 +2,7 @@ import Foundation
 
 /// クリップボード履歴の1エントリ。
 /// JSON で永続化するため Codable に準拠。
-struct ClipItem: Codable, Identifiable {
+struct ClipItem: Codable, Identifiable, Sendable {
     let id: UUID
     let text: String
     let copiedAt: Date

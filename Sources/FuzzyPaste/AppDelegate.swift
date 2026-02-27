@@ -10,7 +10,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let clipboardMonitor = ClipboardMonitor()
     private let historyStore = HistoryStore()
     private let hotkeyManager = HotkeyManager()
+    private let snippetStore = SnippetStore()
     private var searchWindow: SearchWindow?
+    private var snippetManagerWindow: SnippetManagerWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
@@ -49,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ウィンドウは一度作ったら再利用する（毎回生成しない）
         let window = searchWindow ?? createSearchWindow()
         searchWindow = window
-        window.show(items: historyStore.items)
+        window.show(clips: historyStore.items, snippets: snippetStore.items)
     }
 
     private func createSearchWindow() -> SearchWindow {
@@ -64,6 +66,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             PasteHelper.copyToClipboard(text)
         }
         return window
+    }
+
+    // MARK: - スニペット管理
+
+    private func showSnippetManager() {
+        let window = snippetManagerWindow ?? SnippetManagerWindow(store: snippetStore)
+        snippetManagerWindow = window
+        window.showWindow()
+    }
+
+    @objc private func menuShowSnippetManager() {
+        showSnippetManager()
     }
 
     // MARK: - メニューバー
@@ -81,7 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "FuzzyPaste v\(Self.appVersion)", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "スニペット管理...", action: #selector(menuShowSnippetManager), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
     }
 }

@@ -51,4 +51,31 @@ enum FuzzyMatcher {
             .sorted { $0.score > $1.score }
             .map(\.item)
     }
+
+    /// クエリでクリップ履歴とスニペットを統合検索し、スコア順で返す。
+    /// スニペットは title と content の両方で検索し、高い方のスコアを採用。
+    /// クエリが空の場合、クリップ履歴のみを表示（スニペットは検索時のみ混合）。
+    static func filterMixed(query: String, clips: [ClipItem], snippets: [SnippetItem]) -> [SearchResultItem] {
+        if query.isEmpty {
+            return clips.map { SearchResultItem.clip($0) }
+        }
+
+        var scored: [(item: SearchResultItem, score: Int)] = []
+
+        for clip in clips {
+            if let score = match(query: query, target: clip.text) {
+                scored.append((.clip(clip), score))
+            }
+        }
+
+        for snippet in snippets {
+            let titleScore = match(query: query, target: snippet.title)
+            let contentScore = match(query: query, target: snippet.content)
+            if let bestScore = [titleScore, contentScore].compactMap({ $0 }).max() {
+                scored.append((.snippet(snippet), bestScore))
+            }
+        }
+
+        return scored.sorted { $0.score > $1.score }.map(\.item)
+    }
 }
