@@ -4,7 +4,7 @@ import CoreGraphics
 /// クリップボードへの書き込みと、Cmd+V シミュレートによるペースト操作を担当。
 ///
 /// ペーストの流れ:
-/// 1. テキストをクリップボードにセット
+/// 1. テキスト/画像をクリップボードにセット
 /// 2. 元アプリをアクティブにする
 /// 3. 少し待ってからCGEvent でCmd+V キー入力をシミュレート
 ///
@@ -30,11 +30,32 @@ enum PasteHelper {
         }
     }
 
+    /// 画像をクリップボードにセットし、元アプリにフォーカスを戻してからCmd+Vをシミュレート
+    static func pasteImage(at fileURL: URL, previousApp: NSRunningApplication?) {
+        copyImageToClipboard(at: fileURL)
+        previousApp?.activate()
+
+        Task { @MainActor in
+            try? await Task.sleep(for: activationDelay)
+            simulatePaste()
+        }
+    }
+
     /// テキストをクリップボードにセットする（ペーストはしない）
     static func copyToClipboard(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    /// 画像をクリップボードにセットする（ペーストはしない）
+    /// TIFF も同時に書き込むことで多くのアプリとの互換性を確保。
+    static func copyImageToClipboard(at fileURL: URL) {
+        guard let imageData = try? Data(contentsOf: fileURL),
+              let image = NSImage(data: imageData) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
     }
 
     /// CGEvent を使って Cmd+V キー押下をシミュレート。

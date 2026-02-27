@@ -1,16 +1,47 @@
 import Foundation
 
+/// 画像のメタデータ。実際の画像ファイルは images/ 配下に保存され、
+/// JSON にはこのメタデータのみを記録する。
+struct ImageMetadata: Codable, Sendable, Equatable {
+    let fileName: String        // UUID.png (images/ 配下)
+    let originalUTType: String  // "public.png" 等
+    let originalFileName: String? // Finder コピー時の元ファイル名
+    let pixelWidth: Int
+    let pixelHeight: Int
+    let fileSizeBytes: Int64
+}
+
+/// クリップボードアイテムのコンテンツ種別。
+enum ClipContent: Sendable, Equatable {
+    case text(String)
+    case image(ImageMetadata)
+}
+
+extension ClipContent: Codable {}
+
 /// クリップボード履歴の1エントリ。
 /// JSON で永続化するため Codable に準拠。
 struct ClipItem: Codable, Identifiable, Sendable {
     let id: UUID
-    let text: String
+    let content: ClipContent
     let copiedAt: Date
 
     init(text: String) {
         self.id = UUID()
-        self.text = text
+        self.content = .text(text)
         self.copiedAt = Date()
+    }
+
+    init(imageMetadata: ImageMetadata) {
+        self.id = UUID()
+        self.content = .image(imageMetadata)
+        self.copiedAt = Date()
+    }
+
+    /// テキストコンテンツを返す。画像の場合は nil。
+    var text: String? {
+        if case .text(let string) = content { return string }
+        return nil
     }
 }
 
@@ -24,6 +55,8 @@ final class HistoryStore {
 
     private(set) var items: [ClipItem] = []
     private let fileURL: URL
+    /// 画像ファイル削除用コールバック。ImageStore が設定する。
+    var onImageDelete: ((String) -> Void)?
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -33,14 +66,29 @@ final class HistoryStore {
         load()
     }
 
+    /// テキストアイテムを追加。同じテキストが既にあれば重複排除して先頭に移動。
     func add(_ text: String) {
-        // 同じテキストが既にあれば削除（重複排除）→ 先頭に新規挿入
         items.removeAll { $0.text == text }
         items.insert(ClipItem(text: text), at: 0)
+        trimAndSave()
+    }
 
-        // 上限を超えた古いエントリを切り捨て
+    /// 画像アイテムを追加。画像は重複排除しない（毎回新規）。
+    func addImage(_ metadata: ImageMetadata) {
+        items.insert(ClipItem(imageMetadata: metadata), at: 0)
+        trimAndSave()
+    }
+
+    /// 上限を超えた古いエントリを切り捨て、画像ファイルも削除してから保存。
+    private func trimAndSave() {
         if items.count > Self.maxItems {
+            let removed = Array(items[Self.maxItems...])
             items = Array(items.prefix(Self.maxItems))
+            for item in removed {
+                if case .image(let meta) = item.content {
+                    onImageDelete?(meta.fileName)
+                }
+            }
         }
         save()
     }
