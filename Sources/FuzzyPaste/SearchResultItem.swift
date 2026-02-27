@@ -12,9 +12,4 @@ enum SearchResultItem: Sendable {
         case .snippet(let item): return item.content
         }
     }
-
-    var isSnippet: Bool {
-        if case .snippet = self { return true }
-        return false
-    }
 }
