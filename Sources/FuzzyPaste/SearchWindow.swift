@@ -57,8 +57,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private let scrollView = NSScrollView()
     private let tableView = NonFocusTableView()
 
-    private var allItems: [ClipItem] = []
-    private var filteredItems: [ClipItem] = []
+    private var allClips: [ClipItem] = []
+    private var allSnippets: [SnippetItem] = []
+    private var filteredItems: [SearchResultItem] = []
     /// ウィンドウを開く直前にアクティブだったアプリ。ペースト先として使用。
     private var previousApp: NSRunningApplication?
     /// Enter で選択 → ペースト実行
@@ -114,7 +115,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         searchIcon.translatesAutoresizingMaskIntoConstraints = false
         searchContainer.addSubview(searchIcon)
 
-        searchField.placeholderString = "Type to search..."
+        searchField.placeholderString = "検索..."
         searchField.font = .systemFont(ofSize: Layout.searchFontSize, weight: .light)
         searchField.focusRingType = .none
         searchField.isBordered = false
@@ -195,7 +196,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         hintSeparator.translatesAutoresizingMaskIntoConstraints = false
         hintBar.addSubview(hintSeparator)
 
-        let hintLabel = NSTextField(labelWithString: "⏎ Paste    ⌘C Copy    esc Close")
+        let hintLabel = NSTextField(labelWithString: "⏎ ペースト    ⌘C コピー    esc 閉じる")
         hintLabel.font = .systemFont(ofSize: Layout.hintFontSize)
         hintLabel.textColor = .tertiaryLabelColor
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -220,12 +221,13 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     // MARK: - Show / Dismiss
 
-    func show(items: [ClipItem]) {
+    func show(clips: [ClipItem], snippets: [SnippetItem]) {
         // ウィンドウを開く前にアクティブなアプリを記録（ペースト先として使う）
         previousApp = NSWorkspace.shared.frontmostApplication
-        allItems = items
+        allClips = clips
+        allSnippets = snippets
         searchField.stringValue = ""
-        filteredItems = items
+        filteredItems = FuzzyMatcher.filterMixed(query: "", clips: clips, snippets: snippets)
         tableView.reloadData()
 
         positionNearCursor()
@@ -303,7 +305,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     /// 検索フィールドの入力が変わるたびにfuzzy searchでフィルタリング
     func controlTextDidChange(_ obj: Notification) {
         let query = searchField.stringValue
-        filteredItems = FuzzyMatcher.filter(query: query, items: allItems)
+        filteredItems = FuzzyMatcher.filterMixed(query: query, clips: allClips, snippets: allSnippets)
         tableView.reloadData()
         if !filteredItems.isEmpty {
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
@@ -366,11 +368,33 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             cellView = view
         }
 
-        // 改行を半角スペースに置換して1行表示
+        // アイテム種別に応じてテキストを設定
         let item = filteredItems[row]
-        cellView.textField?.stringValue = item.text
-            .components(separatedBy: .newlines)
-            .joined(separator: " ")
+        switch item {
+        case .clip(let clipItem):
+            // 改行を半角スペースに置換して1行表示
+            cellView.textField?.stringValue = clipItem.text
+                .components(separatedBy: .newlines)
+                .joined(separator: " ")
+        case .snippet(let snippetItem):
+            // ★ title  content（スニペットは控えめな星で区別）
+            let attrStr = NSMutableAttributedString()
+            attrStr.append(NSAttributedString(string: "★ ", attributes: [
+                .foregroundColor: NSColor.systemOrange.withAlphaComponent(0.7),
+                .font: NSFont.systemFont(ofSize: Layout.cellFontSize),
+            ]))
+            attrStr.append(NSAttributedString(string: snippetItem.title, attributes: [
+                .font: NSFont.systemFont(ofSize: Layout.cellFontSize, weight: .medium),
+            ]))
+            let preview = snippetItem.content
+                .components(separatedBy: .newlines)
+                .joined(separator: " ")
+            attrStr.append(NSAttributedString(string: "  \(preview)", attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: NSFont.systemFont(ofSize: Layout.cellFontSize - 1),
+            ]))
+            cellView.textField?.attributedStringValue = attrStr
+        }
         return cellView
     }
 
