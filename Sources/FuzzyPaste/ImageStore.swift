@@ -11,8 +11,8 @@ final class ImageStore {
     private let thumbsDir: URL
     /// サムネイルのメモリキャッシュ。頻繁にスクロールされる検索ウィンドウ向け。
     private let thumbCache = NSCache<NSString, NSImage>()
-    /// サムネイルサイズ (128x128 @2x = 256px)
-    private static let thumbMaxPixels = 256
+    /// サムネイルサイズ (256x256 @2x = 512px)
+    private static let thumbMaxPixels = 512
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
