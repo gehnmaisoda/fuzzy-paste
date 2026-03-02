@@ -55,15 +55,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     /// レイアウト定数。デザイン調整はここを変えるだけでOK。
     private enum Layout {
-        static let windowSize = NSSize(width: 480, height: 360)
+        static let windowSize = NSSize(width: 600, height: 420)
         static let cornerRadius: CGFloat = 12
         static let searchFontSize: CGFloat = 18
         static let cellFontSize: CGFloat = 13
         static let hintFontSize: CGFloat = 11
         static let rowHeight: CGFloat = 36
         static let snippetRowHeight: CGFloat = 56
-        static let imageRowHeight: CGFloat = 64
-        static let thumbSize: CGFloat = 52
+        static let imageRowHeight: CGFloat = 80
+        static let thumbSize: CGFloat = 64
         static let windowPadding: CGFloat = 12
         static let cellPadding: CGFloat = 16
         static let searchHeight: CGFloat = 36
@@ -311,9 +311,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private func updateHintLabel() {
         var parts: [String]
         if orderedSelection.count >= 2 {
-            parts = ["⏎ \(orderedSelection.count)件ペースト", "⇧Space プレビュー", "⌘E スニペット管理"]
+            parts = ["⏎ or D&D \(orderedSelection.count)件ペースト"]
         } else {
-            parts = ["⏎ ペースト", "⌘C コピー", "⇧Space プレビュー", "⌘E スニペット管理"]
+            parts = ["⏎ ペースト", "⌘C コピー", "⌘Click 複数選択", "⇧Space プレビュー", "⌘E スニペット管理"]
         }
         if suggestedTag != nil {
             parts.insert("⇥ タグ絞り込み", at: 0)
