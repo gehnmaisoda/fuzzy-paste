@@ -69,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ウィンドウは一度作ったら再利用する（毎回生成しない）
         let window = searchWindow ?? createSearchWindow()
         searchWindow = window
-        window.show(clips: historyStore.items, snippets: snippetStore.items, imageStore: imageStore)
+        window.show(clips: historyStore.items, snippets: snippetStore.items, imageStore: imageStore, allTags: snippetStore.allTags)
     }
 
     private func createSearchWindow() -> SearchWindow {

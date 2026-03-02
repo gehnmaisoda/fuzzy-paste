@@ -54,10 +54,26 @@ enum FuzzyMatcher {
     }
 
     /// クエリでクリップ履歴とスニペットを統合検索し、スコア順で返す。
-    /// スニペットは title と content の両方で検索し、高い方のスコアを採用。
+    /// スニペットは title, content, tags で検索し、高い方のスコアを採用。
     /// クエリが空の場合、クリップ履歴のみを表示（スニペットは検索時のみ混合）。
     /// クエリがある場合、画像アイテムはスキップ（テキスト検索不可）。
-    static func filterMixed(query: String, clips: [ClipItem], snippets: [SnippetItem]) -> [SearchResultItem] {
+    /// tagFilters が指定された場合、全てのタグを持つスニペットのみ表示（クリップは除外）。
+    static func filterMixed(query: String, clips: [ClipItem], snippets: [SnippetItem], tagFilters: [String] = []) -> [SearchResultItem] {
+        if !tagFilters.isEmpty {
+            let filtered = snippets.filter { snippet in
+                tagFilters.allSatisfy { snippet.tags.contains($0) }
+            }
+            if query.isEmpty {
+                return filtered.map { .snippet($0) }
+            }
+            var scored: [(item: SearchResultItem, score: Int)] = []
+            for snippet in filtered {
+                let best = bestSnippetScore(query: query, snippet: snippet)
+                if let s = best { scored.append((.snippet(snippet), s)) }
+            }
+            return scored.sorted { $0.score > $1.score }.map(\.item)
+        }
+
         if query.isEmpty {
             return clips.map { SearchResultItem.clip($0) }
         }
@@ -80,13 +96,23 @@ enum FuzzyMatcher {
         }
 
         for snippet in snippets {
-            let titleScore = match(query: query, target: snippet.title)
-            let contentScore = match(query: query, target: snippet.content)
-            if let bestScore = [titleScore, contentScore].compactMap({ $0 }).max() {
+            if let bestScore = bestSnippetScore(query: query, snippet: snippet) {
                 scored.append((.snippet(snippet), bestScore))
             }
         }
 
         return scored.sorted { $0.score > $1.score }.map(\.item)
+    }
+
+    /// スニペットの title, content, tags からベストスコアを返す
+    private static func bestSnippetScore(query: String, snippet: SnippetItem) -> Int? {
+        var scores: [Int?] = [
+            match(query: query, target: snippet.title),
+            match(query: query, target: snippet.content),
+        ]
+        for tag in snippet.tags {
+            scores.append(match(query: query, target: tag))
+        }
+        return scores.compactMap { $0 }.max()
     }
 }
