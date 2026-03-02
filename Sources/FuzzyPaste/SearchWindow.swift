@@ -87,6 +87,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private static let textCellID = NSUserInterfaceItemIdentifier("ClipCell")
     private static let snippetCellID = NSUserInterfaceItemIdentifier("SnippetCell")
     private static let imageCellID = NSUserInterfaceItemIdentifier("ImageClipCell")
+    private static let fileCellID = NSUserInterfaceItemIdentifier("FileClipCell")
 
     // MARK: - プロパティ
 
@@ -107,6 +108,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private var allSnippets: [SnippetItem] = []
     private var filteredItems: [SearchResultItem] = []
     private var imageStore: ImageStore?
+    private var fileStore: FileStore?
     private var quickLookPanel: QuickLookPanel?
 
     /// マルチセレクト: 選択された行インデックスを選択順に保持
@@ -326,7 +328,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     // MARK: - Show / Dismiss
 
-    func show(clips: [ClipItem], snippets: [SnippetItem], imageStore: ImageStore, allTags: [String]) {
+    func show(clips: [ClipItem], snippets: [SnippetItem], imageStore: ImageStore, fileStore: FileStore, allTags: [String]) {
         // 前回のドラッグ用一時ファイルをクリーンアップ
         try? FileManager.default.removeItem(at: Self.dragTempDir)
         // ウィンドウを開く前にアクティブなアプリを記録（ペースト先として使う）
@@ -334,6 +336,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         allClips = clips
         allSnippets = snippets
         self.imageStore = imageStore
+        self.fileStore = fileStore
         self.allTags = allTags
         searchField.stringValue = ""
         activeTagFilters = []
@@ -673,13 +676,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         updateHintLabel()
     }
 
-    /// 可変行高: テキスト 36pt / スニペット 56pt / 画像 64pt
+    /// 可変行高: テキスト 36pt / スニペット 56pt / 画像・ファイル 80pt
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         let item = filteredItems[row]
         switch item {
         case .clip(let clipItem):
-            if case .image = clipItem.content { return Layout.imageRowHeight }
-            return Layout.rowHeight
+            switch clipItem.content {
+            case .image, .file: return Layout.imageRowHeight
+            case .text: return Layout.rowHeight
+            }
         case .snippet:
             return Layout.snippetRowHeight
         }
@@ -698,6 +703,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                     .joined(separator: " "))
             case .image(let meta):
                 cellView = makeImageCell(tableView: tableView, meta: meta)
+            case .file(let meta):
+                cellView = makeFileCell(tableView: tableView, meta: meta)
             }
         case .snippet(let snippetItem):
             cellView = makeSnippetCell(tableView: tableView, snippet: snippetItem)
@@ -816,6 +823,91 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         // 下段: メタデータ
         let sizeStr = formatFileSize(meta.fileSizeBytes)
         subtitleLabel.stringValue = "\(meta.pixelWidth)×\(meta.pixelHeight)  \(sizeStr)"
+
+        return cellView
+    }
+
+    /// ファイルアイテム用セル（2行レイアウト）:
+    /// [icon]  filename.pdf       <- 上段: 太字ファイル名
+    ///         pdf  1.2 MB        <- 下段: 拡張子 + サイズ
+    private func makeFileCell(tableView: NSTableView, meta: FileMetadata) -> NSView {
+        let id = Self.fileCellID
+        let titleTag = 300
+        let subtitleTag = 301
+
+        let iconView: NSImageView
+        let titleLabel: NSTextField
+        let subtitleLabel: NSTextField
+        let cellView: NSTableCellView
+
+        if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView,
+           let existingIcon = existing.imageView,
+           let existingTitle = existing.viewWithTag(titleTag) as? NSTextField,
+           let existingSub = existing.viewWithTag(subtitleTag) as? NSTextField {
+            iconView = existingIcon
+            titleLabel = existingTitle
+            subtitleLabel = existingSub
+            cellView = existing
+        } else {
+            cellView = NSTableCellView()
+            cellView.identifier = id
+
+            iconView = NSImageView()
+            iconView.imageScaling = .scaleProportionallyUpOrDown
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(iconView)
+            cellView.imageView = iconView
+
+            titleLabel = NSTextField(labelWithString: "")
+            titleLabel.tag = titleTag
+            titleLabel.lineBreakMode = .byTruncatingTail
+            titleLabel.font = .systemFont(ofSize: Layout.cellFontSize, weight: .semibold)
+            titleLabel.backgroundColor = .clear
+            titleLabel.drawsBackground = false
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(titleLabel)
+
+            subtitleLabel = NSTextField(labelWithString: "")
+            subtitleLabel.tag = subtitleTag
+            subtitleLabel.lineBreakMode = .byTruncatingTail
+            subtitleLabel.font = .systemFont(ofSize: Layout.cellFontSize - 1)
+            subtitleLabel.textColor = .secondaryLabelColor
+            subtitleLabel.backgroundColor = .clear
+            subtitleLabel.drawsBackground = false
+            subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(subtitleLabel)
+
+            let textLeading = iconView.trailingAnchor.anchorWithOffset(to: titleLabel.leadingAnchor)
+            NSLayoutConstraint.activate([
+                iconView.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: Layout.cellPadding),
+                iconView.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: Layout.thumbSize),
+                iconView.heightAnchor.constraint(equalToConstant: Layout.thumbSize),
+
+                textLeading.constraint(equalToConstant: 8),
+                titleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.cellPadding),
+                titleLabel.bottomAnchor.constraint(equalTo: cellView.centerYAnchor, constant: -1),
+
+                subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+                subtitleLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+                subtitleLabel.topAnchor.constraint(equalTo: cellView.centerYAnchor, constant: 1),
+            ])
+        }
+
+        // アイコン設定
+        iconView.isHidden = false
+        iconView.image = fileStore?.icon(for: meta)
+
+        // 上段: ファイル名
+        titleLabel.stringValue = meta.originalFileName
+
+        // 下段: 拡張子 + サイズ
+        let sizeStr = formatFileSize(meta.fileSizeBytes)
+        if meta.fileExtension.isEmpty {
+            subtitleLabel.stringValue = sizeStr
+        } else {
+            subtitleLabel.stringValue = "\(meta.fileExtension.uppercased())  \(sizeStr)"
+        }
 
         return cellView
     }
@@ -1040,6 +1132,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 } else if let thumb = imageStore?.thumbnail(for: meta.fileName) {
                     panel.showImage(thumb)
                 }
+            case .file(let meta):
+                if let store = fileStore {
+                    panel.showImage(store.icon(for: meta))
+                }
             }
         case .snippet(let snippet):
             panel.showText(snippet.content)
@@ -1150,6 +1246,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             case .image(let meta):
                 guard imageStore != nil else { return nil }
                 return dragURL(for: meta) as NSURL
+            case .file(let meta):
+                guard fileStore != nil else { return nil }
+                return dragFileURL(for: meta) as NSURL
             }
         case .snippet(let snippet):
             return snippet.content as NSString
@@ -1173,6 +1272,24 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             return copyURL
         } catch {
             NSLog("FuzzyPaste: dragURL copy failed: \(error)")
+            return sourceURL
+        }
+    }
+
+    /// D&D 用の URL を返す（ファイル用）。元ファイル名で一時コピーを作成。
+    private func dragFileURL(for meta: FileMetadata) -> URL {
+        guard let store = fileStore else { return URL(fileURLWithPath: "/") }
+        let sourceURL = store.fileURL(for: meta.fileName)
+
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: Self.dragTempDir, withIntermediateDirectories: true)
+            let copyURL = Self.dragTempDir.appendingPathComponent(meta.originalFileName)
+            try? fm.removeItem(at: copyURL)
+            try fm.copyItem(at: sourceURL, to: copyURL)
+            return copyURL
+        } catch {
+            NSLog("FuzzyPaste: dragFileURL copy failed: \(error)")
             return sourceURL
         }
     }

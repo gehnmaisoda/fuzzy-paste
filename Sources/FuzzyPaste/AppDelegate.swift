@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeyManager = HotkeyManager()
     private let snippetStore = SnippetStore()
     private let imageStore = ImageStore()
+    private let fileStore = FileStore()
     private let preferencesStore = PreferencesStore()
     private var searchWindow: SearchWindow?
     private var snippetManagerWindow: SnippetManagerWindow?
@@ -19,17 +20,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
-        setupImageStore()
+        setupStores()
         setupExcludedApps()
         startClipboardMonitor()
         setupHotkey()
     }
 
-    // MARK: - 画像ストア
+    // MARK: - ストア初期化
 
-    private func setupImageStore() {
+    private func setupStores() {
         historyStore.onImageDelete = { [weak self] fileName in
             self?.imageStore.delete(fileName: fileName)
+        }
+        historyStore.onFileDelete = { [weak self] fileName in
+            self?.fileStore.delete(fileName: fileName)
         }
     }
 
@@ -52,6 +56,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .imageData(let data, let utType, let originalFileName):
                 if let metadata = self.imageStore.save(data: data, utType: utType, originalFileName: originalFileName) {
                     self.historyStore.addImage(metadata)
+                }
+            case .fileData(let data, let originalFileName):
+                if let metadata = self.fileStore.save(data: data, originalFileName: originalFileName) {
+                    self.historyStore.addFile(metadata)
                 }
             }
         }
@@ -80,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ウィンドウは一度作ったら再利用する（毎回生成しない）
         let window = searchWindow ?? createSearchWindow()
         searchWindow = window
-        window.show(clips: historyStore.items, snippets: snippetStore.items, imageStore: imageStore, allTags: snippetStore.allTags)
+        window.show(clips: historyStore.items, snippets: snippetStore.items, imageStore: imageStore, fileStore: fileStore, allTags: snippetStore.allTags)
     }
 
     private func createSearchWindow() -> SearchWindow {
@@ -94,6 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .image(let meta):
                 let url = self.imageStore.imageURL(for: meta.fileName)
                 PasteHelper.pasteImage(at: url, previousApp: previousApp)
+            case .file(let meta):
+                let url = self.fileStore.fileURL(for: meta.fileName)
+                PasteHelper.pasteFile(at: url, originalFileName: meta.originalFileName, previousApp: previousApp)
             }
         }
         window.onMultiPaste = { [weak self] items, previousApp in
@@ -116,6 +127,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .image(let meta):
                 let url = self.imageStore.imageURL(for: meta.fileName)
                 PasteHelper.copyImageToClipboard(at: url)
+            case .file(let meta):
+                let url = self.fileStore.fileURL(for: meta.fileName)
+                PasteHelper.copyFileToClipboard(at: url, originalFileName: meta.originalFileName)
             }
         }
         window.onOpenSnippetManager = { [weak self] in

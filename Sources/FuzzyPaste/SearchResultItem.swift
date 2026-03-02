@@ -5,7 +5,7 @@ enum SearchResultItem: Sendable {
     case clip(ClipItem)
     case snippet(SnippetItem)
 
-    /// ペースト / コピー時に使用するテキスト。画像の場合は nil。
+    /// ペースト / コピー時に使用するテキスト。画像・ファイルの場合は nil。
     var text: String? {
         switch self {
         case .clip(let item): return item.text
