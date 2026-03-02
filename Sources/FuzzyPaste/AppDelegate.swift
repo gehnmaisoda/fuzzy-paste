@@ -121,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let button = statusItem.button {
             button.image = NSImage(
-                systemSymbolName: "scissors",
+                systemSymbolName: "doc.text.magnifyingglass",
                 accessibilityDescription: "FuzzyPaste"
             )
         }
@@ -129,7 +129,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "FuzzyPaste v\(Self.appVersion)", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "スニペット管理...", action: #selector(menuShowSnippetManager), keyEquivalent: ""))
+        let snippetItem = NSMenuItem(title: "スニペット管理", action: #selector(menuShowSnippetManager), keyEquivalent: "e")
+        snippetItem.keyEquivalentModifierMask = [.command]
+        menu.addItem(snippetItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
