@@ -12,12 +12,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeyManager = HotkeyManager()
     private let snippetStore = SnippetStore()
     private let imageStore = ImageStore()
+    private let preferencesStore = PreferencesStore()
     private var searchWindow: SearchWindow?
     private var snippetManagerWindow: SnippetManagerWindow?
+    private var preferencesWindow: PreferencesWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
         setupImageStore()
+        setupExcludedApps()
         startClipboardMonitor()
         setupHotkey()
     }
@@ -27,6 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupImageStore() {
         historyStore.onImageDelete = { [weak self] fileName in
             self?.imageStore.delete(fileName: fileName)
+        }
+    }
+
+    // MARK: - 除外アプリ
+
+    private func setupExcludedApps() {
+        clipboardMonitor.shouldExclude = { [weak self] bundleId in
+            self?.preferencesStore.isExcluded(bundleIdentifier: bundleId) ?? false
         }
     }
 
@@ -99,6 +110,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onOpenSnippetManager = { [weak self] in
             self?.showSnippetManager()
         }
+        window.onOpenPreferences = { [weak self] in
+            self?.showPreferences()
+        }
         return window
     }
 
@@ -112,6 +126,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuShowSnippetManager() {
         showSnippetManager()
+    }
+
+    // MARK: - 設定
+
+    private func showPreferences() {
+        let window = preferencesWindow ?? PreferencesWindow(store: preferencesStore)
+        preferencesWindow = window
+        window.showWindow()
+    }
+
+    @objc private func menuShowPreferences() {
+        showPreferences()
     }
 
     // MARK: - メニューバー
@@ -132,6 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let snippetItem = NSMenuItem(title: "スニペット管理", action: #selector(menuShowSnippetManager), keyEquivalent: "e")
         snippetItem.keyEquivalentModifierMask = [.command]
         menu.addItem(snippetItem)
+        let prefsItem = NSMenuItem(title: "設定", action: #selector(menuShowPreferences), keyEquivalent: ",")
+        prefsItem.keyEquivalentModifierMask = [.command]
+        menu.addItem(prefsItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu

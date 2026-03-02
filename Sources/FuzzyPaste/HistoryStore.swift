@@ -67,7 +67,9 @@ final class HistoryStore {
     }
 
     /// テキストアイテムを追加。同じテキストが既にあれば重複排除して先頭に移動。
+    /// 空白・改行・タブのみのテキストは無視する。
     func add(_ text: String) {
+        guard !text.allSatisfy(\.isWhitespace) else { return }
         items.removeAll { $0.text == text }
         items.insert(ClipItem(text: text), at: 0)
         trimAndSave()

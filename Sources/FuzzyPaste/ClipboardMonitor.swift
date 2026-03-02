@@ -24,6 +24,8 @@ final class ClipboardMonitor {
     /// 次のポーリングで一致したらスキップすることで重複検知を防ぐ。
     private var changeCountToIgnore: Int?
     var onNewClip: ((ClipboardContent) -> Void)?
+    /// フロントアプリの bundleIdentifier を受け取り、除外対象なら true を返す。
+    var shouldExclude: ((String) -> Bool)?
 
     init() {
         lastChangeCount = pasteboard.changeCount
@@ -60,6 +62,12 @@ final class ClipboardMonitor {
             return
         }
         changeCountToIgnore = nil
+
+        // フロントアプリが除外対象ならスキップ
+        if let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+           shouldExclude?(bundleId) == true {
+            return
+        }
 
         // 画像を先にチェック（Web コピーは画像+テキスト両方入る → 画像優先）
         if let imageContent = detectImage() {

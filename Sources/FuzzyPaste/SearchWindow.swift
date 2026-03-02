@@ -33,6 +33,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         static let c: UInt16 = 8
         static let a: UInt16 = 0
         static let e: UInt16 = 14
+        static let comma: UInt16 = 43
         static let space: UInt16 = 49
     }
 
@@ -102,6 +103,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     var onCopy: ((ClipItem) -> Void)?
     /// Cmd+E でスニペット管理ウィンドウを開く
     var onOpenSnippetManager: (() -> Void)?
+    /// Cmd+, で設定ウィンドウを開く
+    var onOpenPreferences: (() -> Void)?
 
     init() {
         super.init(
@@ -363,6 +366,14 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             previousApp = nil
             orderOut(nil)
             onOpenSnippetManager?()
+            return true
+        }
+
+        // Cmd+, → 設定ウィンドウを開く
+        if event.keyCode == KeyCode.comma && flags == .command {
+            previousApp = nil
+            orderOut(nil)
+            onOpenPreferences?()
             return true
         }
 
