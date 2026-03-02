@@ -53,34 +53,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         static let space: UInt16 = 49
     }
 
-    /// レイアウト定数。デザイン調整はここを変えるだけでOK。
-    private enum Layout {
-        static let windowSize = NSSize(width: 600, height: 420)
-        static let cornerRadius: CGFloat = 12
-        static let searchFontSize: CGFloat = 18
-        static let cellFontSize: CGFloat = 13
-        static let hintFontSize: CGFloat = 11
-        static let rowHeight: CGFloat = 36
-        static let snippetRowHeight: CGFloat = 56
-        static let imageRowHeight: CGFloat = 80
-        static let thumbSize: CGFloat = 64
-        static let windowPadding: CGFloat = 12
-        static let cellPadding: CGFloat = 16
-        static let searchHeight: CGFloat = 36
-        static let hintBarHeight: CGFloat = 28
-        static let iconSize: CGFloat = 20
-        static let sectionGap: CGFloat = 8
-        static let iconInset: CGFloat = 4
-        static let iconTextGap: CGFloat = 8
-        static let badgeGap: CGFloat = 4
-        static let badgeFontSize: CGFloat = 9
-        static let badgeHPad: CGFloat = 5
-        static let badgeVPad: CGFloat = 1.5
-        static let badgeCornerRadius: CGFloat = 4
-        static let selBadgeSize: CGFloat = 20
-        static let selBadgeFontSize: CGFloat = 11
-        static let selBadgeTrailing: CGFloat = 8
-    }
+    /// レイアウト定数。プリセットにより値が変わる。
+    private let layout: LayoutConfig
 
     // MARK: - セル識別子
 
@@ -141,9 +115,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     /// Cmd+, で設定ウィンドウを開く
     var onOpenPreferences: (() -> Void)?
 
-    init() {
+    init(layout: LayoutConfig = .preset(.medium)) {
+        self.layout = layout
         super.init(
-            contentRect: NSRect(origin: .zero, size: Layout.windowSize),
+            contentRect: NSRect(origin: .zero, size: layout.windowSize),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -168,7 +143,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         visualEffect.material = .sheet
         visualEffect.state = .active
         visualEffect.wantsLayer = true
-        visualEffect.layer?.cornerRadius = Layout.cornerRadius
+        visualEffect.layer?.cornerRadius = layout.cornerRadius
         visualEffect.layer?.masksToBounds = true
         contentView = visualEffect
 
@@ -191,7 +166,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         searchIcon = icon
 
         searchField.placeholderString = "検索..."
-        searchField.font = .systemFont(ofSize: Layout.searchFontSize, weight: .light)
+        searchField.font = .systemFont(ofSize: layout.searchFontSize, weight: .light)
         searchField.focusRingType = .none
         searchField.isBordered = false
         searchField.drawsBackground = false
@@ -200,24 +175,24 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         searchContainer.addSubview(searchField)
 
         // サジェストラベル（ゴーストテキスト）
-        suggestionLabel.font = .systemFont(ofSize: Layout.searchFontSize, weight: .light)
+        suggestionLabel.font = .systemFont(ofSize: layout.searchFontSize, weight: .light)
         suggestionLabel.textColor = .tertiaryLabelColor
         suggestionLabel.isHidden = true
         suggestionLabel.translatesAutoresizingMaskIntoConstraints = false
         searchContainer.addSubview(suggestionLabel)
 
-        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: Layout.iconTextGap)
+        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: layout.iconTextGap)
 
         NSLayoutConstraint.activate([
-            searchContainer.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.sectionGap),
-            searchContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Layout.windowPadding),
-            searchContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Layout.windowPadding),
-            searchContainer.heightAnchor.constraint(equalToConstant: Layout.searchHeight),
+            searchContainer.topAnchor.constraint(equalTo: container.topAnchor, constant: layout.sectionGap),
+            searchContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: layout.windowPadding),
+            searchContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -layout.windowPadding),
+            searchContainer.heightAnchor.constraint(equalToConstant: layout.searchHeight),
 
-            icon.leadingAnchor.constraint(equalTo: searchContainer.leadingAnchor, constant: Layout.iconInset),
+            icon.leadingAnchor.constraint(equalTo: searchContainer.leadingAnchor, constant: layout.iconInset),
             icon.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: Layout.iconSize),
-            icon.heightAnchor.constraint(equalToConstant: Layout.iconSize),
+            icon.widthAnchor.constraint(equalToConstant: layout.iconSize),
+            icon.heightAnchor.constraint(equalToConstant: layout.iconSize),
 
             searchFieldLeading,
             searchField.trailingAnchor.constraint(equalTo: searchContainer.trailingAnchor),
@@ -237,7 +212,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         container.addSubview(separator)
 
         NSLayoutConstraint.activate([
-            separator.topAnchor.constraint(equalTo: anchor.bottomAnchor, constant: Layout.sectionGap),
+            separator.topAnchor.constraint(equalTo: anchor.bottomAnchor, constant: layout.sectionGap),
             separator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
         ])
@@ -251,7 +226,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         tableView.headerView = nil
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.rowHeight = Layout.rowHeight
+        tableView.rowHeight = layout.rowHeight
         tableView.backgroundColor = .clear
         tableView.intercellSpacing = NSSize(width: 0, height: 1)
         tableView.selectionHighlightStyle = .regular
@@ -288,7 +263,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         hintSeparator.translatesAutoresizingMaskIntoConstraints = false
         hintBar.addSubview(hintSeparator)
 
-        hintLabel.font = .systemFont(ofSize: Layout.hintFontSize)
+        hintLabel.font = .systemFont(ofSize: layout.hintFontSize)
         hintLabel.textColor = .tertiaryLabelColor
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
         hintBar.addSubview(hintLabel)
@@ -299,7 +274,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             hintBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             hintBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             hintBar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            hintBar.heightAnchor.constraint(equalToConstant: Layout.hintBarHeight),
+            hintBar.heightAnchor.constraint(equalToConstant: layout.hintBarHeight),
 
             hintSeparator.topAnchor.constraint(equalTo: hintBar.topAnchor),
             hintSeparator.leadingAnchor.constraint(equalTo: hintBar.leadingAnchor),
@@ -512,7 +487,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         guard let container = searchField.superview else { return }
 
         var prevAnchor = searchIcon.trailingAnchor
-        var prevGap = Layout.iconTextGap
+        var prevGap = layout.iconTextGap
 
         for tag in activeTagFilters {
             let badge = TagBadge(text: tag, showClose: true)
@@ -526,7 +501,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             ])
             filterBadges.append(badge)
             prevAnchor = badge.trailingAnchor
-            prevGap = Layout.badgeGap
+            prevGap = layout.badgeGap
         }
 
         // 検索フィールドを最後のバッジの右に配置
@@ -539,7 +514,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         for badge in filterBadges { badge.removeFromSuperview() }
         filterBadges.removeAll()
         searchFieldLeading.isActive = false
-        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: Layout.iconTextGap)
+        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: layout.iconTextGap)
         searchFieldLeading.isActive = true
     }
 
@@ -682,11 +657,11 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         switch item {
         case .clip(let clipItem):
             switch clipItem.content {
-            case .image, .file: return Layout.imageRowHeight
-            case .text: return Layout.rowHeight
+            case .image, .file: return layout.imageRowHeight
+            case .text: return layout.rowHeight
             }
         case .snippet:
-            return Layout.snippetRowHeight
+            return layout.snippetRowHeight
         }
     }
 
@@ -729,15 +704,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         view.identifier = id
         let tf = NSTextField(labelWithString: text)
         tf.lineBreakMode = .byTruncatingTail
-        tf.font = .systemFont(ofSize: Layout.cellFontSize)
+        tf.font = .systemFont(ofSize: layout.cellFontSize)
         tf.backgroundColor = .clear
         tf.drawsBackground = false
         tf.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tf)
         view.textField = tf
         NSLayoutConstraint.activate([
-            tf.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Layout.cellPadding),
-            tf.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Layout.cellPadding),
+            tf.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: layout.cellPadding),
+            tf.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -layout.cellPadding),
             tf.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
         return view
@@ -780,7 +755,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             titleLabel = NSTextField(labelWithString: "")
             titleLabel.tag = titleTag
             titleLabel.lineBreakMode = .byTruncatingTail
-            titleLabel.font = .systemFont(ofSize: Layout.cellFontSize, weight: .semibold)
+            titleLabel.font = .systemFont(ofSize: layout.cellFontSize, weight: .semibold)
             titleLabel.backgroundColor = .clear
             titleLabel.drawsBackground = false
             titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -789,7 +764,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             subtitleLabel = NSTextField(labelWithString: "")
             subtitleLabel.tag = subtitleTag
             subtitleLabel.lineBreakMode = .byTruncatingTail
-            subtitleLabel.font = .systemFont(ofSize: Layout.cellFontSize - 1)
+            subtitleLabel.font = .systemFont(ofSize: layout.cellFontSize - 1)
             subtitleLabel.textColor = .secondaryLabelColor
             subtitleLabel.backgroundColor = .clear
             subtitleLabel.drawsBackground = false
@@ -798,13 +773,13 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
             let textLeading = thumbView.trailingAnchor.anchorWithOffset(to: titleLabel.leadingAnchor)
             NSLayoutConstraint.activate([
-                thumbView.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: Layout.cellPadding),
+                thumbView.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
                 thumbView.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-                thumbView.widthAnchor.constraint(equalToConstant: Layout.thumbSize),
-                thumbView.heightAnchor.constraint(equalToConstant: Layout.thumbSize),
+                thumbView.widthAnchor.constraint(equalToConstant: layout.thumbSize),
+                thumbView.heightAnchor.constraint(equalToConstant: layout.thumbSize),
 
                 textLeading.constraint(equalToConstant: 8),
-                titleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.cellPadding),
+                titleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
                 titleLabel.bottomAnchor.constraint(equalTo: cellView.centerYAnchor, constant: -1),
 
                 subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
@@ -861,7 +836,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             titleLabel = NSTextField(labelWithString: "")
             titleLabel.tag = titleTag
             titleLabel.lineBreakMode = .byTruncatingTail
-            titleLabel.font = .systemFont(ofSize: Layout.cellFontSize, weight: .semibold)
+            titleLabel.font = .systemFont(ofSize: layout.cellFontSize, weight: .semibold)
             titleLabel.backgroundColor = .clear
             titleLabel.drawsBackground = false
             titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -870,7 +845,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             subtitleLabel = NSTextField(labelWithString: "")
             subtitleLabel.tag = subtitleTag
             subtitleLabel.lineBreakMode = .byTruncatingTail
-            subtitleLabel.font = .systemFont(ofSize: Layout.cellFontSize - 1)
+            subtitleLabel.font = .systemFont(ofSize: layout.cellFontSize - 1)
             subtitleLabel.textColor = .secondaryLabelColor
             subtitleLabel.backgroundColor = .clear
             subtitleLabel.drawsBackground = false
@@ -879,13 +854,13 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
             let textLeading = iconView.trailingAnchor.anchorWithOffset(to: titleLabel.leadingAnchor)
             NSLayoutConstraint.activate([
-                iconView.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: Layout.cellPadding),
+                iconView.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
                 iconView.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-                iconView.widthAnchor.constraint(equalToConstant: Layout.thumbSize),
-                iconView.heightAnchor.constraint(equalToConstant: Layout.thumbSize),
+                iconView.widthAnchor.constraint(equalToConstant: layout.thumbSize),
+                iconView.heightAnchor.constraint(equalToConstant: layout.thumbSize),
 
                 textLeading.constraint(equalToConstant: 8),
-                titleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.cellPadding),
+                titleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
                 titleLabel.bottomAnchor.constraint(equalTo: cellView.centerYAnchor, constant: -1),
 
                 subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
@@ -945,7 +920,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             bottomLabel = NSTextField(labelWithString: "")
             bottomLabel.tag = bottomTag
             bottomLabel.lineBreakMode = .byTruncatingTail
-            bottomLabel.font = .systemFont(ofSize: Layout.cellFontSize - 1)
+            bottomLabel.font = .systemFont(ofSize: layout.cellFontSize - 1)
             bottomLabel.textColor = .secondaryLabelColor
             bottomLabel.backgroundColor = .clear
             bottomLabel.drawsBackground = false
@@ -954,12 +929,12 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
             NSLayoutConstraint.activate([
                 topLabel.topAnchor.constraint(equalTo: cellView.topAnchor, constant: 8),
-                topLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: Layout.cellPadding),
-                topLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.cellPadding),
+                topLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
+                topLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
 
                 bottomLabel.topAnchor.constraint(equalTo: topLabel.bottomAnchor, constant: 2),
-                bottomLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: Layout.cellPadding + 12),
-                bottomLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.cellPadding),
+                bottomLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding + 12),
+                bottomLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
             ])
         }
 
@@ -967,14 +942,14 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let attrStr = NSMutableAttributedString()
         attrStr.append(NSAttributedString(string: "★ ", attributes: [
             .foregroundColor: NSColor.systemOrange.withAlphaComponent(0.7),
-            .font: NSFont.systemFont(ofSize: Layout.cellFontSize),
+            .font: NSFont.systemFont(ofSize: layout.cellFontSize),
         ]))
         attrStr.append(NSAttributedString(string: snippet.title, attributes: [
-            .font: NSFont.systemFont(ofSize: Layout.cellFontSize, weight: .medium),
+            .font: NSFont.systemFont(ofSize: layout.cellFontSize, weight: .medium),
         ]))
         for tag in snippet.tags {
             attrStr.append(NSAttributedString(string: " "))
-            attrStr.append(Self.tagBadgeAttachment(text: tag))
+            attrStr.append(tagBadgeAttachment(text: tag))
         }
         topLabel.attributedStringValue = attrStr
 
@@ -989,23 +964,26 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     /// タグのピル型バッジを NSTextAttachment として生成する。
     /// NSAttributedString にインラインで埋め込める画像を返す。
-    private static func tagBadgeAttachment(text: String) -> NSAttributedString {
-        let font = NSFont.systemFont(ofSize: Layout.badgeFontSize, weight: .medium)
+    private func tagBadgeAttachment(text: String) -> NSAttributedString {
+        let font = NSFont.systemFont(ofSize: layout.badgeFontSize, weight: .medium)
         let textColor = NSColor.secondaryLabelColor
         let bgColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.2)
 
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
         let textSize = (text as NSString).size(withAttributes: attrs)
         let badgeSize = NSSize(
-            width: textSize.width + Layout.badgeHPad * 2,
-            height: textSize.height + Layout.badgeVPad * 2
+            width: textSize.width + layout.badgeHPad * 2,
+            height: textSize.height + layout.badgeVPad * 2
         )
 
+        let badgeCornerRadius = layout.badgeCornerRadius
+        let badgeHPad = layout.badgeHPad
+        let badgeVPad = layout.badgeVPad
         let image = NSImage(size: badgeSize, flipped: false) { rect in
-            let path = NSBezierPath(roundedRect: rect, xRadius: Layout.badgeCornerRadius, yRadius: Layout.badgeCornerRadius)
+            let path = NSBezierPath(roundedRect: rect, xRadius: badgeCornerRadius, yRadius: badgeCornerRadius)
             bgColor.setFill()
             path.fill()
-            let textRect = NSRect(x: Layout.badgeHPad, y: Layout.badgeVPad, width: textSize.width, height: textSize.height)
+            let textRect = NSRect(x: badgeHPad, y: badgeVPad, width: textSize.width, height: textSize.height)
             (text as NSString).draw(in: textRect, withAttributes: attrs)
             return true
         }
@@ -1013,7 +991,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let attachment = NSTextAttachment()
         attachment.image = image
         // ベースラインを調整して文字と揃える
-        let baselineOffset = (Layout.cellFontSize - badgeSize.height) / 2 - 1
+        let baselineOffset = (layout.cellFontSize - badgeSize.height) / 2 - 1
         attachment.bounds = NSRect(x: 0, y: baselineOffset, width: badgeSize.width, height: badgeSize.height)
         return NSAttributedString(attachment: attachment)
     }
@@ -1175,14 +1153,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     /// 選択順バッジの画像を生成する。円の中央に番号を描画。
     private func makeSelectionBadgeImage(number: Int) -> NSImage {
-        let size = Layout.selBadgeSize
+        let size = layout.selBadgeSize
+        let selBadgeFontSize = layout.selBadgeFontSize
         return NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             NSColor.systemBlue.setFill()
             NSBezierPath(ovalIn: rect).fill()
 
             let text = "\(number)"
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: Layout.selBadgeFontSize, weight: .bold),
+                .font: NSFont.systemFont(ofSize: selBadgeFontSize, weight: .bold),
                 .foregroundColor: NSColor.white,
             ]
             let textSize = (text as NSString).size(withAttributes: attrs)
@@ -1208,10 +1187,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             badge.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(badge)
             NSLayoutConstraint.activate([
-                badge.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.selBadgeTrailing),
+                badge.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.selBadgeTrailing),
                 badge.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-                badge.widthAnchor.constraint(equalToConstant: Layout.selBadgeSize),
-                badge.heightAnchor.constraint(equalToConstant: Layout.selBadgeSize),
+                badge.widthAnchor.constraint(equalToConstant: layout.selBadgeSize),
+                badge.heightAnchor.constraint(equalToConstant: layout.selBadgeSize),
             ])
         }
 
