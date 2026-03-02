@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 /// アプリ全体のライフサイクルを管理する司令塔。
 /// メニューバー常駐、クリップボード監視、ホットキー、検索ウィンドウを統括する。
@@ -17,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var searchWindow: SearchWindow?
     private var snippetManagerWindow: SnippetManagerWindow?
     private var preferencesWindow: PreferencesWindow?
+    private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
@@ -24,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupExcludedApps()
         startClipboardMonitor()
         setupHotkey()
+        observeWindowSizePreset()
     }
 
     // MARK: - ストア初期化
@@ -75,6 +78,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager.register()
     }
 
+    // MARK: - ウィンドウサイズプリセット監視
+
+    private func observeWindowSizePreset() {
+        preferencesStore.$windowSizePreset
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.searchWindow = nil
+            }
+            .store(in: &cancellables)
+    }
+
     // MARK: - 検索ウィンドウ
 
     /// Cmd+Shift+V で呼ばれるトグル処理。
@@ -92,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func createSearchWindow() -> SearchWindow {
-        let window = SearchWindow()
+        let window = SearchWindow(layout: preferencesStore.layoutConfig)
         window.onPaste = { [weak self] item, previousApp in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()
