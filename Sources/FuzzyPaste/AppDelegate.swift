@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startClipboardMonitor()
         setupHotkey()
         observeWindowSizePreset()
+        observeMaxHistoryCount()
     }
 
     // MARK: - ストア初期化
@@ -38,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         historyStore.onFileDelete = { [weak self] fileName in
             self?.fileStore.delete(fileName: fileName)
         }
+        historyStore.setMaxItems(preferencesStore.maxHistoryCount)
     }
 
     // MARK: - 除外アプリ
@@ -78,13 +80,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager.register()
     }
 
-    // MARK: - ウィンドウサイズプリセット監視
+    // MARK: - 設定変更監視
 
     private func observeWindowSizePreset() {
         preferencesStore.$windowSizePreset
             .dropFirst()
             .sink { [weak self] _ in
                 self?.searchWindow = nil
+            }
+            .store(in: &cancellables)
+    }
+
+    private func observeMaxHistoryCount() {
+        preferencesStore.$maxHistoryCount
+            .dropFirst()
+            .sink { [weak self] count in
+                self?.historyStore.setMaxItems(count)
             }
             .store(in: &cancellables)
     }
@@ -170,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 設定
 
     private func showPreferences() {
-        let window = preferencesWindow ?? PreferencesWindow(store: preferencesStore)
+        let window = preferencesWindow ?? PreferencesWindow(store: preferencesStore, historyStore: historyStore)
         preferencesWindow = window
         window.showWindow()
     }

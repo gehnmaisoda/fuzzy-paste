@@ -88,16 +88,19 @@ struct ExcludedApp: Codable, Identifiable, Sendable {
 private struct Preferences: Codable, Sendable {
     var excludedApps: [ExcludedApp] = []
     var windowSizePreset: WindowSizePreset = .medium
+    var maxHistoryCount: Int = PreferencesStore.defaultMaxHistoryCount
 
-    init(excludedApps: [ExcludedApp] = [], windowSizePreset: WindowSizePreset = .medium) {
+    init(excludedApps: [ExcludedApp] = [], windowSizePreset: WindowSizePreset = .medium, maxHistoryCount: Int = PreferencesStore.defaultMaxHistoryCount) {
         self.excludedApps = excludedApps
         self.windowSizePreset = windowSizePreset
+        self.maxHistoryCount = maxHistoryCount
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         excludedApps = try container.decodeIfPresent([ExcludedApp].self, forKey: .excludedApps) ?? []
         windowSizePreset = try container.decodeIfPresent(WindowSizePreset.self, forKey: .windowSizePreset) ?? .medium
+        maxHistoryCount = try container.decodeIfPresent(Int.self, forKey: .maxHistoryCount) ?? PreferencesStore.defaultMaxHistoryCount
     }
 }
 
@@ -107,8 +110,14 @@ private struct Preferences: Codable, Sendable {
 /// 保存先: ~/Library/Application Support/FuzzyPaste/preferences.json
 @MainActor
 final class PreferencesStore: ObservableObject {
+    /// 履歴の最大保持件数のデフォルト値。
+    nonisolated static let defaultMaxHistoryCount = 500
+    /// 履歴の最大保持件数の選択肢。
+    nonisolated static let maxHistoryCountOptions = [100, 300, 500, 1000, 2000]
+
     @Published private(set) var excludedApps: [ExcludedApp] = []
     @Published private(set) var windowSizePreset: WindowSizePreset = .medium
+    @Published private(set) var maxHistoryCount: Int = PreferencesStore.defaultMaxHistoryCount
     private let fileURL: URL
 
     var layoutConfig: LayoutConfig {
@@ -145,6 +154,12 @@ final class PreferencesStore: ObservableObject {
         save()
     }
 
+    func setMaxHistoryCount(_ count: Int) {
+        guard maxHistoryCount != count else { return }
+        maxHistoryCount = count
+        save()
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         let decoder = JSONDecoder()
@@ -152,11 +167,12 @@ final class PreferencesStore: ObservableObject {
         if let prefs = try? decoder.decode(Preferences.self, from: data) {
             excludedApps = prefs.excludedApps
             windowSizePreset = prefs.windowSizePreset
+            maxHistoryCount = prefs.maxHistoryCount
         }
     }
 
     private func save() {
-        let prefs = Preferences(excludedApps: excludedApps, windowSizePreset: windowSizePreset)
+        let prefs = Preferences(excludedApps: excludedApps, windowSizePreset: windowSizePreset, maxHistoryCount: maxHistoryCount)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(prefs) else { return }

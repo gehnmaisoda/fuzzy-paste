@@ -63,12 +63,12 @@ struct ClipItem: Codable, Identifiable, Sendable {
 }
 
 /// クリップボード履歴をメモリ上に保持し、JSON ファイルで永続化するストア。
-/// 最大 500 件を FIFO で管理。同じテキストの重複は先頭に移動して統合する。
+/// 設定可能な最大件数で FIFO 管理。同じテキストの重複は先頭に移動して統合する。
 ///
 /// 保存先: ~/Library/Application Support/FuzzyPaste/history.json
 @MainActor
 final class HistoryStore {
-    private static let maxItems = 500
+    private(set) var maxItems = PreferencesStore.defaultMaxHistoryCount
 
     private(set) var items: [ClipItem] = []
     private let fileURL: URL
@@ -106,23 +106,43 @@ final class HistoryStore {
         trimAndSave()
     }
 
+    /// 最大件数を変更し、超過分があればトリムして保存。
+    func setMaxItems(_ count: Int) {
+        guard maxItems != count else { return }
+        maxItems = count
+        trimAndSave()
+    }
+
+    /// すべての履歴を削除し、画像・ファイルの実体も削除して保存。
+    func clearAll() {
+        let removed = items
+        items = []
+        deleteAssociatedFiles(for: removed)
+        save()
+    }
+
     /// 上限を超えた古いエントリを切り捨て、画像・ファイルの実体も削除してから保存。
     private func trimAndSave() {
-        if items.count > Self.maxItems {
-            let removed = Array(items[Self.maxItems...])
-            items = Array(items.prefix(Self.maxItems))
-            for item in removed {
-                switch item.content {
-                case .image(let meta):
-                    onImageDelete?(meta.fileName)
-                case .file(let meta):
-                    onFileDelete?(meta.fileName)
-                case .text:
-                    break
-                }
-            }
+        if items.count > maxItems {
+            let removed = Array(items[maxItems...])
+            items = Array(items.prefix(maxItems))
+            deleteAssociatedFiles(for: removed)
         }
         save()
+    }
+
+    /// 削除対象アイテムに紐づく画像・ファイルの実体を削除する。
+    private func deleteAssociatedFiles(for items: [ClipItem]) {
+        for item in items {
+            switch item.content {
+            case .image(let meta):
+                onImageDelete?(meta.fileName)
+            case .file(let meta):
+                onFileDelete?(meta.fileName)
+            case .text:
+                break
+            }
+        }
     }
 
     private func load() {

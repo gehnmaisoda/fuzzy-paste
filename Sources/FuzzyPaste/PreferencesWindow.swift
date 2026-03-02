@@ -15,7 +15,7 @@ final class PreferencesWindow: NSWindow {
         static let w: UInt16 = 13
     }
 
-    init(store: PreferencesStore) {
+    init(store: PreferencesStore, historyStore: HistoryStore) {
         super.init(
             contentRect: NSRect(origin: .zero, size: Layout.windowSize),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
@@ -37,7 +37,7 @@ final class PreferencesWindow: NSWindow {
         bg.layer?.masksToBounds = true
         contentView = bg
 
-        let hostingView = NSHostingView(rootView: PreferencesView(store: store))
+        let hostingView = NSHostingView(rootView: PreferencesView(store: store, historyStore: historyStore))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         bg.addSubview(hostingView)
 
