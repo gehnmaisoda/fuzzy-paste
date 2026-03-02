@@ -73,6 +73,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private let contentTextView = NSTextView(frame: .zero)
     private let contentScrollView = NSScrollView()
     private let contentPlaceholder = PlaceholderLabel(labelWithString: "内容を入力...")
+    private let tagContainer = TagFlowContainer()
     private let addButton = NSButton(frame: .zero)
     private let removeButton = NSButton(frame: .zero)
 
@@ -314,6 +315,16 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         titleField.translatesAutoresizingMaskIntoConstraints = false
         titleWrapper.addSubview(titleField)
 
+        // ── タグ ──
+        let tagLabel = makeLabel("タグ")
+        panel.addSubview(tagLabel)
+
+        tagContainer.onTagsChanged = { [weak self] _ in
+            guard let self, !self.isUpdatingFields else { return }
+            self.saveCurrentEdits()
+        }
+        panel.addSubview(tagContainer)
+
         // ── 内容 ──
         let contentLabel = makeLabel("内容")
         panel.addSubview(contentLabel)
@@ -368,7 +379,14 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             titleField.trailingAnchor.constraint(equalTo: titleWrapper.trailingAnchor, constant: -Layout.inputPadding),
             titleField.centerYAnchor.constraint(equalTo: titleWrapper.centerYAnchor),
 
-            contentLabel.topAnchor.constraint(equalTo: titleWrapper.bottomAnchor, constant: Layout.sectionSpacing),
+            tagLabel.topAnchor.constraint(equalTo: titleWrapper.bottomAnchor, constant: Layout.sectionSpacing),
+            tagLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+
+            tagContainer.topAnchor.constraint(equalTo: tagLabel.bottomAnchor, constant: Layout.spacing),
+            tagContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            tagContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+
+            contentLabel.topAnchor.constraint(equalTo: tagContainer.bottomAnchor, constant: Layout.sectionSpacing),
             contentLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
 
             contentWrapper.topAnchor.constraint(equalTo: contentLabel.bottomAnchor, constant: Layout.spacing),
@@ -552,9 +570,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private func updateEditFields() {
         let row = tableView.selectedRow
         isUpdatingFields = true
+        tagContainer.allKnownTags = store.allTags
         if row >= 0 && row < store.items.count {
             let item = store.items[row]
             titleField.stringValue = item.title
+            tagContainer.tags = item.tags
             contentTextView.string = item.content
             titleField.isEnabled = true
             contentTextView.isEditable = true
@@ -563,6 +583,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             contentPlaceholder.isHidden = !item.content.isEmpty
         } else {
             titleField.stringValue = ""
+            tagContainer.tags = []
             contentTextView.string = ""
             titleField.isEnabled = false
             contentTextView.isEditable = false
@@ -579,8 +600,10 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         store.update(
             id: store.items[row].id,
             title: titleField.stringValue,
-            content: contentTextView.string
+            content: contentTextView.string,
+            tags: tagContainer.tags
         )
+        tagContainer.allKnownTags = store.allTags
         tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
     }
 

@@ -5,12 +5,14 @@ struct SnippetItem: Codable, Identifiable, Sendable {
     let id: UUID
     var title: String
     var content: String
+    var tags: [String]
     let createdAt: Date
 
-    init(id: UUID = UUID(), title: String, content: String, createdAt: Date = Date()) {
+    init(id: UUID = UUID(), title: String, content: String, tags: [String] = [], createdAt: Date = Date()) {
         self.id = id
         self.title = title
         self.content = content
+        self.tags = tags
         self.createdAt = createdAt
     }
 }
@@ -35,11 +37,16 @@ final class SnippetStore {
         save()
     }
 
-    func update(id: UUID, title: String, content: String) {
+    func update(id: UUID, title: String, content: String, tags: [String] = []) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         let old = items[index]
-        items[index] = SnippetItem(id: old.id, title: title, content: content, createdAt: old.createdAt)
+        items[index] = SnippetItem(id: old.id, title: title, content: content, tags: tags, createdAt: old.createdAt)
         save()
+    }
+
+    /// 全スニペットのタグを重複排除・ソートして返す
+    var allTags: [String] {
+        Array(Set(items.flatMap(\.tags))).sorted()
     }
 
     func remove(id: UUID) {

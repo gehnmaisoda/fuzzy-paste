@@ -13,15 +13,14 @@ private final class NonFocusTableView: NSTableView {
 ///
 /// 構成:
 /// ┌──────────────────────────┐
-/// │ 🔍 検索フィールド         │ ← fuzzy search 入力
+/// │ [tag×] 🔍 検索フィールド  │ ← タグフィルタ + fuzzy search
 /// ├──────────────────────────┤
 /// │ 履歴アイテム1             │ ← ↑↓キーで選択
-/// │ 履歴アイテム2             │
-/// │ [thumb] filename.png     │ ← 画像アイテム（2行）
-/// │         1920×1080 2.3MB  │
+/// │ ★ スニペット名            │ ← 2行表示（タグバッジ付き）
+/// │   内容プレビュー...       │
 /// │ ...                      │
 /// ├──────────────────────────┤
-/// │ ⏎ ペースト ⌘C コピー ... │ ← ショートカットヒント
+/// │ ⏎ ペースト ⌘C コピー ... │ ← ショートカットヒント（動的）
 /// └──────────────────────────┘
 ///
 /// NSPanel を使用することで、他アプリの上にフローティング表示できる。
@@ -45,6 +44,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         static let cellFontSize: CGFloat = 13
         static let hintFontSize: CGFloat = 11
         static let rowHeight: CGFloat = 36
+        static let snippetRowHeight: CGFloat = 56
         static let imageRowHeight: CGFloat = 64
         static let thumbSize: CGFloat = 52
         static let windowPadding: CGFloat = 12
@@ -55,11 +55,17 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         static let sectionGap: CGFloat = 8
         static let iconInset: CGFloat = 4
         static let iconTextGap: CGFloat = 8
+        static let badgeGap: CGFloat = 4
+        static let badgeFontSize: CGFloat = 9
+        static let badgeHPad: CGFloat = 5
+        static let badgeVPad: CGFloat = 1.5
+        static let badgeCornerRadius: CGFloat = 4
     }
 
     // MARK: - セル識別子
 
     private static let textCellID = NSUserInterfaceItemIdentifier("ClipCell")
+    private static let snippetCellID = NSUserInterfaceItemIdentifier("SnippetCell")
     private static let imageCellID = NSUserInterfaceItemIdentifier("ImageClipCell")
 
     // MARK: - プロパティ
@@ -67,12 +73,27 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private let searchField = NSTextField()
     private let scrollView = NSScrollView()
     private let tableView = NonFocusTableView()
+    private let hintLabel = NSTextField(labelWithString: "")
+    private let suggestionLabel = NSTextField(labelWithString: "")
+
+    /// タグフィルタバッジ（検索フィールド左に表示、複数対応）
+    private var filterBadges: [TagBadge] = []
+    /// 検索フィールドの leading constraint（フィルタバッジで動的調整）
+    private var searchFieldLeading: NSLayoutConstraint!
+    /// 検索アイコンの参照
+    private var searchIcon: NSImageView!
 
     private var allClips: [ClipItem] = []
     private var allSnippets: [SnippetItem] = []
     private var filteredItems: [SearchResultItem] = []
     private var imageStore: ImageStore?
     private var quickLookPanel: QuickLookPanel?
+
+    // タグフィルタ状態
+    private var allTags: [String] = []
+    private var activeTagFilters: [String] = []
+    private var suggestedTag: String?
+
     /// ウィンドウを開く直前にアクティブだったアプリ。ペースト先として使用。
     private var previousApp: NSRunningApplication?
     /// Enter で選択 → ペースト実行（ClipItem ベース）
@@ -124,11 +145,12 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         searchContainer.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(searchContainer)
 
-        let searchIcon = NSImageView()
-        searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
-        searchIcon.contentTintColor = .tertiaryLabelColor
-        searchIcon.translatesAutoresizingMaskIntoConstraints = false
-        searchContainer.addSubview(searchIcon)
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
+        icon.contentTintColor = .tertiaryLabelColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        searchContainer.addSubview(icon)
+        searchIcon = icon
 
         searchField.placeholderString = "検索..."
         searchField.font = .systemFont(ofSize: Layout.searchFontSize, weight: .light)
@@ -139,20 +161,32 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchContainer.addSubview(searchField)
 
+        // サジェストラベル（ゴーストテキスト）
+        suggestionLabel.font = .systemFont(ofSize: Layout.searchFontSize, weight: .light)
+        suggestionLabel.textColor = .tertiaryLabelColor
+        suggestionLabel.isHidden = true
+        suggestionLabel.translatesAutoresizingMaskIntoConstraints = false
+        searchContainer.addSubview(suggestionLabel)
+
+        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: Layout.iconTextGap)
+
         NSLayoutConstraint.activate([
             searchContainer.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.sectionGap),
             searchContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Layout.windowPadding),
             searchContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Layout.windowPadding),
             searchContainer.heightAnchor.constraint(equalToConstant: Layout.searchHeight),
 
-            searchIcon.leadingAnchor.constraint(equalTo: searchContainer.leadingAnchor, constant: Layout.iconInset),
-            searchIcon.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
-            searchIcon.widthAnchor.constraint(equalToConstant: Layout.iconSize),
-            searchIcon.heightAnchor.constraint(equalToConstant: Layout.iconSize),
+            icon.leadingAnchor.constraint(equalTo: searchContainer.leadingAnchor, constant: Layout.iconInset),
+            icon.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: Layout.iconSize),
+            icon.heightAnchor.constraint(equalToConstant: Layout.iconSize),
 
-            searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: Layout.iconTextGap),
+            searchFieldLeading,
             searchField.trailingAnchor.constraint(equalTo: searchContainer.trailingAnchor),
             searchField.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
+
+            suggestionLabel.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
+            suggestionLabel.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
         ])
 
         return searchContainer
@@ -211,7 +245,6 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         hintSeparator.translatesAutoresizingMaskIntoConstraints = false
         hintBar.addSubview(hintSeparator)
 
-        let hintLabel = NSTextField(labelWithString: "⏎ ペースト    ⌘C コピー    ⇧Space プレビュー    ⌘E スニペット管理")
         hintLabel.font = .systemFont(ofSize: Layout.hintFontSize)
         hintLabel.textColor = .tertiaryLabelColor
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -234,18 +267,35 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         ])
     }
 
+    private func updateHintLabel() {
+        var parts = ["⏎ ペースト", "⌘C コピー", "⇧Space プレビュー", "⌘E スニペット管理"]
+        if suggestedTag != nil {
+            parts.insert("⇥ タグ絞り込み", at: 0)
+        }
+        if !activeTagFilters.isEmpty {
+            parts.insert("⌫ フィルタ解除", at: 0)
+        }
+        hintLabel.stringValue = parts.joined(separator: "    ")
+    }
+
     // MARK: - Show / Dismiss
 
-    func show(clips: [ClipItem], snippets: [SnippetItem], imageStore: ImageStore) {
+    func show(clips: [ClipItem], snippets: [SnippetItem], imageStore: ImageStore, allTags: [String]) {
         // ウィンドウを開く前にアクティブなアプリを記録（ペースト先として使う）
         previousApp = NSWorkspace.shared.frontmostApplication
         allClips = clips
         allSnippets = snippets
         self.imageStore = imageStore
+        self.allTags = allTags
         searchField.stringValue = ""
+        activeTagFilters = []
+        suggestedTag = nil
+        suggestionLabel.isHidden = true
+        removeAllFilterBadges()
         filteredItems = FuzzyMatcher.filterMixed(query: "", clips: clips, snippets: snippets)
         tableView.reloadData()
         tableView.scrollRowToVisible(0)
+        updateHintLabel()
 
         positionNearCursor()
         makeKeyAndOrderFront(nil)
@@ -339,21 +389,116 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         super.sendEvent(event)
     }
 
-    // MARK: - NSTextFieldDelegate
+    // MARK: - Tag suggestion
 
-    /// 検索フィールドの入力が変わるたびにfuzzy searchでフィルタリング
-    func controlTextDidChange(_ obj: Notification) {
+    private func updateSuggestion() {
+        let input = searchField.stringValue
+        guard !input.isEmpty, !allTags.isEmpty else {
+            suggestedTag = nil
+            suggestionLabel.isHidden = true
+            updateHintLabel()
+            return
+        }
+
+        let lower = input.lowercased()
+        // 既にフィルタ中のタグはサジェストから除外
+        if let match = allTags.first(where: {
+            $0.lowercased().hasPrefix(lower) && !activeTagFilters.contains($0)
+        }) {
+            suggestedTag = match
+            suggestionLabel.stringValue = match
+            suggestionLabel.isHidden = false
+        } else {
+            suggestedTag = nil
+            suggestionLabel.isHidden = true
+        }
+        updateHintLabel()
+    }
+
+    // MARK: - Tag filter
+
+    private func applyTagFilter(_ tag: String) {
+        activeTagFilters.append(tag)
+        suggestedTag = nil
+        suggestionLabel.isHidden = true
+        searchField.stringValue = ""
+        refreshAfterFilterChange()
+    }
+
+    private func removeTagFilter(_ tag: String) {
+        activeTagFilters.removeAll { $0 == tag }
+        refreshAfterFilterChange()
+    }
+
+    private func clearLastTagFilter() {
+        guard !activeTagFilters.isEmpty else { return }
+        activeTagFilters.removeLast()
+        refreshAfterFilterChange()
+    }
+
+    /// タグフィルタ変更後の共通リフレッシュ処理
+    private func refreshAfterFilterChange() {
+        rebuildFilterBadges()
+        refilter()
+        updateHintLabel()
+    }
+
+    private func rebuildFilterBadges() {
+        removeAllFilterBadges()
+        guard let container = searchField.superview else { return }
+
+        var prevAnchor = searchIcon.trailingAnchor
+        var prevGap = Layout.iconTextGap
+
+        for tag in activeTagFilters {
+            let badge = TagBadge(text: tag, showClose: true)
+            let tagToRemove = tag
+            badge.onRemove = { [weak self] in self?.removeTagFilter(tagToRemove) }
+            container.addSubview(badge)
+
+            NSLayoutConstraint.activate([
+                badge.leadingAnchor.constraint(equalTo: prevAnchor, constant: prevGap),
+                badge.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            ])
+            filterBadges.append(badge)
+            prevAnchor = badge.trailingAnchor
+            prevGap = Layout.badgeGap
+        }
+
+        // 検索フィールドを最後のバッジの右に配置
+        searchFieldLeading.isActive = false
+        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: prevAnchor, constant: prevGap)
+        searchFieldLeading.isActive = true
+    }
+
+    private func removeAllFilterBadges() {
+        for badge in filterBadges { badge.removeFromSuperview() }
+        filterBadges.removeAll()
+        searchFieldLeading.isActive = false
+        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: Layout.iconTextGap)
+        searchFieldLeading.isActive = true
+    }
+
+    private func refilter() {
         let query = searchField.stringValue
-        filteredItems = FuzzyMatcher.filterMixed(query: query, clips: allClips, snippets: allSnippets)
+        filteredItems = FuzzyMatcher.filterMixed(query: query, clips: allClips, snippets: allSnippets, tagFilters: activeTagFilters)
         tableView.reloadData()
         if !filteredItems.isEmpty {
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             tableView.scrollRowToVisible(0)
         }
+    }
+
+    // MARK: - NSTextFieldDelegate
+
+    /// 検索フィールドの入力が変わるたびにfuzzy searchでフィルタリング
+    func controlTextDidChange(_ obj: Notification) {
+        refilter()
+        updateSuggestion()
         updateQuickLookContent()
     }
 
-    /// 検索フィールド内での特殊キー（Enter, Esc, ↑↓）を処理。
+    /// 検索フィールド内での特殊キー（Enter, Esc, ↑↓, Tab, Delete）を処理。
     /// true を返すと「処理済み」としてデフォルト動作を抑制する。
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(insertNewline(_:)) {
@@ -372,6 +517,21 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             moveSelection(by: 1)
             return true
         }
+        // Tab: サジェストがあればタグフィルタ発動
+        if commandSelector == #selector(insertTab(_:)) {
+            if let tag = suggestedTag {
+                applyTagFilter(tag)
+                return true
+            }
+            return true // Tab の通常動作を抑制
+        }
+        // Backspace: 検索フィールドが空でフィルタ中なら最後のタグを解除
+        if commandSelector == #selector(deleteBackward(_:)) {
+            if searchField.stringValue.isEmpty && !activeTagFilters.isEmpty {
+                clearLastTagFilter()
+                return true
+            }
+        }
         return false
     }
 
@@ -387,13 +547,16 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     /// スクロール確定後に明示的に行うため、ここでは何もしない。
     func tableViewSelectionDidChange(_ notification: Notification) {}
 
-    /// 可変行高: テキスト 36pt / 画像 64pt
+    /// 可変行高: テキスト 36pt / スニペット 56pt / 画像 64pt
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         let item = filteredItems[row]
-        if case .clip(let clipItem) = item, case .image = clipItem.content {
-            return Layout.imageRowHeight
+        switch item {
+        case .clip(let clipItem):
+            if case .image = clipItem.content { return Layout.imageRowHeight }
+            return Layout.rowHeight
+        case .snippet:
+            return Layout.snippetRowHeight
         }
-        return Layout.rowHeight
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -528,31 +691,58 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         return cellView
     }
 
-    /// スニペット用セル
-    private func makeSnippetCell(tableView: NSTableView, snippet: SnippetItem) -> NSTableCellView {
-        let id = Self.textCellID
-        let cellView: NSTableCellView
-        if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView {
+    /// スニペット用セル（2行レイアウト）:
+    /// 上段: ★ タイトル [tag1] [tag2]
+    /// 下段:   内容プレビュー...
+    private func makeSnippetCell(tableView: NSTableView, snippet: SnippetItem) -> NSView {
+        let id = Self.snippetCellID
+        let topTag = 200  // セル内ラベル識別用
+        let bottomTag = 201  // セル内ラベル識別用
+
+        let topLabel: NSTextField
+        let bottomLabel: NSTextField
+        let cellView: NSView
+
+        if let existing = tableView.makeView(withIdentifier: id, owner: nil),
+           let existingTop = existing.viewWithTag(topTag) as? NSTextField,
+           let existingBottom = existing.viewWithTag(bottomTag) as? NSTextField {
+            topLabel = existingTop
+            bottomLabel = existingBottom
             cellView = existing
-            cellView.imageView?.isHidden = true
         } else {
-            cellView = NSTableCellView()
+            cellView = NSView()
             cellView.identifier = id
-            let tf = NSTextField(labelWithString: "")
-            tf.lineBreakMode = .byTruncatingTail
-            tf.font = .systemFont(ofSize: Layout.cellFontSize)
-            tf.backgroundColor = .clear
-            tf.drawsBackground = false
-            tf.translatesAutoresizingMaskIntoConstraints = false
-            cellView.addSubview(tf)
-            cellView.textField = tf
+
+            topLabel = NSTextField(labelWithString: "")
+            topLabel.tag = topTag
+            topLabel.lineBreakMode = .byTruncatingTail
+            topLabel.backgroundColor = .clear
+            topLabel.drawsBackground = false
+            topLabel.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(topLabel)
+
+            bottomLabel = NSTextField(labelWithString: "")
+            bottomLabel.tag = bottomTag
+            bottomLabel.lineBreakMode = .byTruncatingTail
+            bottomLabel.font = .systemFont(ofSize: Layout.cellFontSize - 1)
+            bottomLabel.textColor = .secondaryLabelColor
+            bottomLabel.backgroundColor = .clear
+            bottomLabel.drawsBackground = false
+            bottomLabel.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(bottomLabel)
+
             NSLayoutConstraint.activate([
-                tf.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: Layout.cellPadding),
-                tf.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.cellPadding),
-                tf.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
+                topLabel.topAnchor.constraint(equalTo: cellView.topAnchor, constant: 8),
+                topLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: Layout.cellPadding),
+                topLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.cellPadding),
+
+                bottomLabel.topAnchor.constraint(equalTo: topLabel.bottomAnchor, constant: 2),
+                bottomLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: Layout.cellPadding + 12),
+                bottomLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.cellPadding),
             ])
         }
 
+        // 上段: ★ タイトル + タグバッジ
         let attrStr = NSMutableAttributedString()
         attrStr.append(NSAttributedString(string: "★ ", attributes: [
             .foregroundColor: NSColor.systemOrange.withAlphaComponent(0.7),
@@ -561,15 +751,50 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         attrStr.append(NSAttributedString(string: snippet.title, attributes: [
             .font: NSFont.systemFont(ofSize: Layout.cellFontSize, weight: .medium),
         ]))
+        for tag in snippet.tags {
+            attrStr.append(NSAttributedString(string: " "))
+            attrStr.append(Self.tagBadgeAttachment(text: tag))
+        }
+        topLabel.attributedStringValue = attrStr
+
+        // 下段: 内容プレビュー
         let preview = snippet.content
             .components(separatedBy: .newlines)
             .joined(separator: " ")
-        attrStr.append(NSAttributedString(string: "  \(preview)", attributes: [
-            .foregroundColor: NSColor.secondaryLabelColor,
-            .font: NSFont.systemFont(ofSize: Layout.cellFontSize - 1),
-        ]))
-        cellView.textField?.attributedStringValue = attrStr
+        bottomLabel.stringValue = preview
+
         return cellView
+    }
+
+    /// タグのピル型バッジを NSTextAttachment として生成する。
+    /// NSAttributedString にインラインで埋め込める画像を返す。
+    private static func tagBadgeAttachment(text: String) -> NSAttributedString {
+        let font = NSFont.systemFont(ofSize: Layout.badgeFontSize, weight: .medium)
+        let textColor = NSColor.secondaryLabelColor
+        let bgColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.2)
+
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
+        let textSize = (text as NSString).size(withAttributes: attrs)
+        let badgeSize = NSSize(
+            width: textSize.width + Layout.badgeHPad * 2,
+            height: textSize.height + Layout.badgeVPad * 2
+        )
+
+        let image = NSImage(size: badgeSize, flipped: false) { rect in
+            let path = NSBezierPath(roundedRect: rect, xRadius: Layout.badgeCornerRadius, yRadius: Layout.badgeCornerRadius)
+            bgColor.setFill()
+            path.fill()
+            let textRect = NSRect(x: Layout.badgeHPad, y: Layout.badgeVPad, width: textSize.width, height: textSize.height)
+            (text as NSString).draw(in: textRect, withAttributes: attrs)
+            return true
+        }
+
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        // ベースラインを調整して文字と揃える
+        let baselineOffset = (Layout.cellFontSize - badgeSize.height) / 2 - 1
+        attachment.bounds = NSRect(x: 0, y: baselineOffset, width: badgeSize.width, height: badgeSize.height)
+        return NSAttributedString(attachment: attachment)
     }
 
     // MARK: - Actions
