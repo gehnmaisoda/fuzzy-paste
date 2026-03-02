@@ -55,8 +55,8 @@ enum FuzzyMatcher {
 
     /// クエリでクリップ履歴とスニペットを統合検索し、スコア順で返す。
     /// スニペットは title, content, tags で検索し、高い方のスコアを採用。
+    /// 画像・ファイルはファイル名で検索対象にする。
     /// クエリが空の場合、クリップ履歴のみを表示（スニペットは検索時のみ混合）。
-    /// クエリがある場合、画像アイテムはスキップ（テキスト検索不可）。
     /// tagFilters が指定された場合、全てのタグを持つスニペットのみ表示（クリップは除外）。
     static func filterMixed(query: String, clips: [ClipItem], snippets: [SnippetItem], tagFilters: [String] = []) -> [SearchResultItem] {
         if !tagFilters.isEmpty {
@@ -90,6 +90,10 @@ enum FuzzyMatcher {
                 // 画像は originalFileName があれば検索対象にする
                 if let name = meta.originalFileName,
                    let score = match(query: query, target: name) {
+                    scored.append((.clip(clip), score))
+                }
+            case .file(let meta):
+                if let score = match(query: query, target: meta.originalFileName) {
                     scored.append((.clip(clip), score))
                 }
             }

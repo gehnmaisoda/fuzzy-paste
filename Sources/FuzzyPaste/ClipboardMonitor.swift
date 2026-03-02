@@ -4,10 +4,11 @@ import AppKit
 enum ClipboardContent: Sendable {
     case text(String)
     case imageData(Data, utType: String, originalFileName: String?)
+    case fileData(Data, originalFileName: String)
 }
 
 /// システムクリップボード (NSPasteboard.general) を定期的にポーリングし、
-/// 新しいテキストまたは画像がコピーされたことを検知するモニター。
+/// 新しいテキスト・画像・ファイルがコピーされたことを検知するモニター。
 ///
 /// macOS にはクリップボード変更の通知APIがないため、
 /// changeCount を定期チェックする方式を採用（Clipy等も同じ手法）。
@@ -69,8 +70,20 @@ final class ClipboardMonitor {
             return
         }
 
-        // 画像を先にチェック（Web コピーは画像+テキスト両方入る → 画像優先）
-        if let imageContent = detectImage() {
+        // Finder のファイルコピー: 画像→ファイル→テキストの優先順で検出
+        if let url = fileURLFromPasteboard() {
+            if let content = detectImageFromFileURL(url) {
+                onNewClip?(content)
+                return
+            }
+            if let content = detectFileFromFileURL(url) {
+                onNewClip?(content)
+                return
+            }
+        }
+
+        // スクリーンショットや Web コピー → TIFF/PNG を直接取得
+        if let imageContent = detectImageDirect() {
             onNewClip?(imageContent)
             return
         }
@@ -82,19 +95,18 @@ final class ClipboardMonitor {
     }
 
     private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp", "heic"]
+    /// ファイルサイズ上限: 50MB
+    private static let maxFileSize: Int64 = 50 * 1024 * 1024
 
-    /// ペーストボードから画像データを検出する。
-    /// Finder のファイルコピーの場合は実際の画像ファイルを読み込む。
-    private func detectImage() -> ClipboardContent? {
-        let hasFileURL = pasteboard.types?.contains(.fileURL) == true
+    /// ペーストボードからファイル URL を取得する。
+    private func fileURLFromPasteboard() -> URL? {
+        guard pasteboard.types?.contains(.fileURL) == true,
+              let urlString = pasteboard.string(forType: .fileURL) else { return nil }
+        return URL(string: urlString)
+    }
 
-        if hasFileURL {
-            // Finder のファイルコピー → 画像ファイルなら中身を読む
-            // ファイルコピー時の TIFF はファイルアイコンなので無視する
-            return detectImageFromFileURL()
-        }
-
-        // スクリーンショットや Web コピー → TIFF/PNG を直接取得
+    /// ペーストボードから直接画像データを検出する（スクリーンショットや Web コピー用）。
+    private func detectImageDirect() -> ClipboardContent? {
         if let data = pasteboard.data(forType: .tiff) {
             return .imageData(data, utType: "public.tiff", originalFileName: nil)
         }
@@ -104,14 +116,27 @@ final class ClipboardMonitor {
         return nil
     }
 
-    /// ペーストボード上のファイルURLから画像ファイルを読み込む。
-    private func detectImageFromFileURL() -> ClipboardContent? {
-        guard let urlString = pasteboard.string(forType: .fileURL),
-              let url = URL(string: urlString) else { return nil }
+    /// ファイル URL が画像ファイルなら読み込んで返す。
+    private func detectImageFromFileURL(_ url: URL) -> ClipboardContent? {
         let ext = url.pathExtension.lowercased()
         guard Self.imageExtensions.contains(ext) else { return nil }
         guard let data = try? Data(contentsOf: url) else { return nil }
-        let originalFileName = url.lastPathComponent
-        return .imageData(data, utType: "public.\(ext)", originalFileName: originalFileName)
+        return .imageData(data, utType: "public.\(ext)", originalFileName: url.lastPathComponent)
+    }
+
+    /// ファイル URL が画像以外の通常ファイルなら読み込んで返す。
+    private func detectFileFromFileURL(_ url: URL) -> ClipboardContent? {
+        let ext = url.pathExtension.lowercased()
+        // 画像は detectImageFromFileURL で処理済み
+        guard !Self.imageExtensions.contains(ext) else { return nil }
+        // ディレクトリはスキップ
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { return nil }
+        // ファイルサイズチェック
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let fileSize = attrs[.size] as? Int64,
+              fileSize <= Self.maxFileSize else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return .fileData(data, originalFileName: url.lastPathComponent)
     }
 }

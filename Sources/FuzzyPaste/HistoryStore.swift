@@ -11,10 +11,21 @@ struct ImageMetadata: Codable, Sendable, Equatable {
     let fileSizeBytes: Int64
 }
 
+/// ファイルのメタデータ。実際のファイルは files/ 配下に保存され、
+/// JSON にはこのメタデータのみを記録する。
+struct FileMetadata: Codable, Sendable, Equatable {
+    let fileName: String          // UUID.ext (files/ 配下)
+    let originalFileName: String  // コピー時の元ファイル名
+    let fileExtension: String     // "pdf" 等
+    let utType: String            // "com.adobe.pdf" 等
+    let fileSizeBytes: Int64
+}
+
 /// クリップボードアイテムのコンテンツ種別。
 enum ClipContent: Sendable, Equatable {
     case text(String)
     case image(ImageMetadata)
+    case file(FileMetadata)
 }
 
 extension ClipContent: Codable {}
@@ -38,7 +49,13 @@ struct ClipItem: Codable, Identifiable, Sendable {
         self.copiedAt = Date()
     }
 
-    /// テキストコンテンツを返す。画像の場合は nil。
+    init(fileMetadata: FileMetadata) {
+        self.id = UUID()
+        self.content = .file(fileMetadata)
+        self.copiedAt = Date()
+    }
+
+    /// テキストコンテンツを返す。画像・ファイルの場合は nil。
     var text: String? {
         if case .text(let string) = content { return string }
         return nil
@@ -57,6 +74,8 @@ final class HistoryStore {
     private let fileURL: URL
     /// 画像ファイル削除用コールバック。ImageStore が設定する。
     var onImageDelete: ((String) -> Void)?
+    /// ファイル削除用コールバック。FileStore が設定する。
+    var onFileDelete: ((String) -> Void)?
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -81,14 +100,25 @@ final class HistoryStore {
         trimAndSave()
     }
 
-    /// 上限を超えた古いエントリを切り捨て、画像ファイルも削除してから保存。
+    /// ファイルアイテムを追加。ファイルは重複排除しない（毎回新規）。
+    func addFile(_ metadata: FileMetadata) {
+        items.insert(ClipItem(fileMetadata: metadata), at: 0)
+        trimAndSave()
+    }
+
+    /// 上限を超えた古いエントリを切り捨て、画像・ファイルの実体も削除してから保存。
     private func trimAndSave() {
         if items.count > Self.maxItems {
             let removed = Array(items[Self.maxItems...])
             items = Array(items.prefix(Self.maxItems))
             for item in removed {
-                if case .image(let meta) = item.content {
+                switch item.content {
+                case .image(let meta):
                     onImageDelete?(meta.fileName)
+                case .file(let meta):
+                    onFileDelete?(meta.fileName)
+                case .text:
+                    break
                 }
             }
         }
