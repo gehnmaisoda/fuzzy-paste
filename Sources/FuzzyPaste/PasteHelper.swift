@@ -30,6 +30,12 @@ enum PasteHelper {
         }
     }
 
+    /// 複数テキストを結合してペーストする。選択順に改行で結合して単一のペースト操作として実行。
+    static func paste(_ texts: [String], previousApp: NSRunningApplication?) {
+        let joined = texts.joined(separator: "\n")
+        paste(joined, previousApp: previousApp)
+    }
+
     /// 画像をクリップボードにセットし、元アプリにフォーカスを戻してからCmd+Vをシミュレート
     static func pasteImage(at fileURL: URL, previousApp: NSRunningApplication?) {
         copyImageToClipboard(at: fileURL)

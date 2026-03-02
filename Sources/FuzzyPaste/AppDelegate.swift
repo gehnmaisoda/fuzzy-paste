@@ -96,6 +96,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 PasteHelper.pasteImage(at: url, previousApp: previousApp)
             }
         }
+        window.onMultiPaste = { [weak self] items, previousApp in
+            guard let self else { return }
+            self.clipboardMonitor.ignoreNextChange()
+            // テキストアイテムのみ抽出し、選択順に改行で結合してペースト
+            let texts = items.compactMap { item -> String? in
+                if case .text(let text) = item.content { return text }
+                return nil
+            }
+            guard !texts.isEmpty else { return }
+            PasteHelper.paste(texts, previousApp: previousApp)
+        }
         window.onCopy = { [weak self] item in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()

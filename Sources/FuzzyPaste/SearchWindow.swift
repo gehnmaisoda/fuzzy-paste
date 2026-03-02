@@ -7,6 +7,22 @@ import AppKit
 @MainActor
 private final class NonFocusTableView: NSTableView {
     override var acceptsFirstResponder: Bool { false }
+
+    /// Shift/Cmd+Click 時にクリックされた行を通知するコールバック。
+    /// SearchWindow が orderedSelection を自前管理するために使用。
+    var onMultiSelectClick: ((Int) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Shift+Click / Cmd+Click → カスタムマルチセレクト処理
+        if flags.contains(.shift) || flags.contains(.command) {
+            let point = convert(event.locationInWindow, from: nil)
+            let row = self.row(at: point)
+            if row >= 0 { onMultiSelectClick?(row) }
+            return
+        }
+        super.mouseDown(with: event)
+    }
 }
 
 /// ポップアップ検索ウィンドウ。Cmd+Shift+V で表示される。
@@ -61,6 +77,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         static let badgeHPad: CGFloat = 5
         static let badgeVPad: CGFloat = 1.5
         static let badgeCornerRadius: CGFloat = 4
+        static let selBadgeSize: CGFloat = 20
+        static let selBadgeFontSize: CGFloat = 11
+        static let selBadgeTrailing: CGFloat = 8
     }
 
     // MARK: - セル識別子
@@ -90,6 +109,18 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private var imageStore: ImageStore?
     private var quickLookPanel: QuickLookPanel?
 
+    /// マルチセレクト: 選択された行インデックスを選択順に保持
+    private var orderedSelection: [Int] = []
+    /// ユーザーが明示的に Shift/Cmd+Click でマルチセレクトを開始したか
+    private var isManualMultiSelect = false
+    /// toggleMultiSelect 内で selectRowIndexes を呼ぶ際、delegate の二重更新を防ぐフラグ
+    private var suppressSelectionChange = false
+    /// マルチセレクト中のドラッグ操作を追跡（ドラッグ中はウィンドウを閉じない）
+    private var isDragging = false
+    /// D&D 用の一時ディレクトリ（元ファイル名でハードコピーを作成）
+    private static let dragTempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("FuzzyPaste-drag", isDirectory: true)
+
     // タグフィルタ状態
     private var allTags: [String] = []
     private var activeTagFilters: [String] = []
@@ -99,6 +130,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private var previousApp: NSRunningApplication?
     /// Enter で選択 → ペースト実行（ClipItem ベース）
     var onPaste: ((ClipItem, NSRunningApplication?) -> Void)?
+    /// マルチセレクト時のペースト（選択順の ClipItem 配列）
+    var onMultiPaste: (([ClipItem], NSRunningApplication?) -> Void)?
     /// Cmd+C で選択 → クリップボードにコピーのみ（ClipItem ベース）
     var onCopy: ((ClipItem) -> Void)?
     /// Cmd+E でスニペット管理ウィンドウを開く
@@ -220,9 +253,14 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         tableView.backgroundColor = .clear
         tableView.intercellSpacing = NSSize(width: 0, height: 1)
         tableView.selectionHighlightStyle = .regular
+        tableView.allowsMultipleSelection = true
         tableView.doubleAction = #selector(tableDoubleClicked)
         tableView.target = self
         tableView.style = .plain
+        tableView.setDraggingSourceOperationMask(.copy, forLocal: false)
+        tableView.onMultiSelectClick = { [weak self] row in
+            self?.toggleMultiSelect(row: row)
+        }
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -271,7 +309,12 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     private func updateHintLabel() {
-        var parts = ["⏎ ペースト", "⌘C コピー", "⇧Space プレビュー", "⌘E スニペット管理"]
+        var parts: [String]
+        if orderedSelection.count >= 2 {
+            parts = ["⏎ \(orderedSelection.count)件ペースト", "⇧Space プレビュー", "⌘E スニペット管理"]
+        } else {
+            parts = ["⏎ ペースト", "⌘C コピー", "⇧Space プレビュー", "⌘E スニペット管理"]
+        }
         if suggestedTag != nil {
             parts.insert("⇥ タグ絞り込み", at: 0)
         }
@@ -284,6 +327,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     // MARK: - Show / Dismiss
 
     func show(clips: [ClipItem], snippets: [SnippetItem], imageStore: ImageStore, allTags: [String]) {
+        // 前回のドラッグ用一時ファイルをクリーンアップ
+        try? FileManager.default.removeItem(at: Self.dragTempDir)
         // ウィンドウを開く前にアクティブなアプリを記録（ペースト先として使う）
         previousApp = NSWorkspace.shared.frontmostApplication
         allClips = clips
@@ -295,6 +340,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         suggestedTag = nil
         suggestionLabel.isHidden = true
         removeAllFilterBadges()
+        orderedSelection = []
+        isManualMultiSelect = false
+        isDragging = false
         filteredItems = FuzzyMatcher.filterMixed(query: "", clips: clips, snippets: snippets)
         tableView.reloadData()
         tableView.scrollRowToVisible(0)
@@ -308,6 +356,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         // 先頭のアイテムを自動選択
         if !filteredItems.isEmpty {
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            orderedSelection = [0]
         }
     }
 
@@ -341,9 +390,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     /// ウィンドウからフォーカスが外れたら自動的に閉じる。
     /// 他のアプリをクリックしたり、別のウィンドウに切り替えた時に発火。
+    /// ドラッグ中はウィンドウを閉じない。
     override func resignKey() {
         super.resignKey()
-        dismiss()
+        if !isDragging { dismiss() }
     }
 
     // MARK: - Key handling
@@ -492,11 +542,13 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     private func refilter() {
         let query = searchField.stringValue
+        orderedSelection = []
         filteredItems = FuzzyMatcher.filterMixed(query: query, clips: allClips, snippets: allSnippets, tagFilters: activeTagFilters)
         tableView.reloadData()
         if !filteredItems.isEmpty {
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             tableView.scrollRowToVisible(0)
+            orderedSelection = [0]
         }
     }
 
@@ -552,11 +604,74 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         filteredItems.count
     }
 
+    // MARK: - Drag & Drop
+
+    /// D&D: ドラッグ開始時にペーストボードにデータを書き込む。
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+        guard row >= 0, row < filteredItems.count else { return nil }
+        return pasteboardWriter(for: filteredItems[row])
+    }
+
+    /// D&D: ドラッグセッション開始時の処理。
+    /// マルチセレクト時はペーストボードを選択順で書き直す。
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession,
+                   willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet) {
+        isDragging = true
+        guard orderedSelection.count >= 2 else { return }
+
+        // マルチセレクト: 選択順に各アイテムを個別にペーストボードへ書き直す
+        let writers = orderedSelection.compactMap { idx -> NSPasteboardWriting? in
+            guard idx >= 0, idx < filteredItems.count else { return nil }
+            return pasteboardWriter(for: filteredItems[idx])
+        }
+        let pasteboard = session.draggingPasteboard
+        pasteboard.clearContents()
+        pasteboard.writeObjects(writers)
+    }
+
+    /// D&D: ドラッグセッション終了時の処理。ウィンドウを閉じる。
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession,
+                   endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        isDragging = false
+        dismiss()
+    }
+
     // MARK: - NSTableViewDelegate
 
-    /// Quick Look の更新は moveSelection / controlTextDidChange 等から
-    /// スクロール確定後に明示的に行うため、ここでは何もしない。
-    func tableViewSelectionDidChange(_ notification: Notification) {}
+    /// 通常クリック / 自動選択で発火。単一選択にリセットする。
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !suppressSelectionChange else { return }
+        isManualMultiSelect = false
+        let row = tableView.selectedRow
+        if row >= 0 {
+            orderedSelection = [row]
+        } else {
+            orderedSelection = []
+        }
+        updateSelectionBadges()
+        updateHintLabel()
+    }
+
+    /// Shift/Cmd+Click: クリックされた行をマルチセレクトでトグルする。
+    /// 自動選択されていたアイテムは含めず、明示的にクリックしたものだけカウント。
+    private func toggleMultiSelect(row: Int) {
+        if !isManualMultiSelect {
+            // 初回: 通常選択状態をクリアしてマルチセレクト開始
+            orderedSelection = [row]
+            isManualMultiSelect = true
+        } else if let idx = orderedSelection.firstIndex(of: row) {
+            // マルチセレクト中に同じ行をクリック → トグル解除
+            orderedSelection.remove(at: idx)
+            if orderedSelection.isEmpty { isManualMultiSelect = false }
+        } else {
+            orderedSelection.append(row)
+        }
+        suppressSelectionChange = true
+        tableView.selectRowIndexes(IndexSet(orderedSelection), byExtendingSelection: false)
+        suppressSelectionChange = false
+        updateSelectionBadges()
+        updateHintLabel()
+    }
 
     /// 可変行高: テキスト 36pt / スニペット 56pt / 画像 64pt
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
@@ -573,19 +688,22 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let item = filteredItems[row]
 
+        let cellView: NSView
         switch item {
         case .clip(let clipItem):
             switch clipItem.content {
             case .text(let text):
-                return makeTextCell(tableView: tableView, text: text
+                cellView = makeTextCell(tableView: tableView, text: text
                     .components(separatedBy: .newlines)
                     .joined(separator: " "))
             case .image(let meta):
-                return makeImageCell(tableView: tableView, meta: meta)
+                cellView = makeImageCell(tableView: tableView, meta: meta)
             }
         case .snippet(let snippetItem):
-            return makeSnippetCell(tableView: tableView, snippet: snippetItem)
+            cellView = makeSnippetCell(tableView: tableView, snippet: snippetItem)
         }
+        configureSelectionBadge(in: cellView, row: row)
+        return cellView
     }
 
     // MARK: - Cell factories
@@ -829,13 +947,28 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     /// Enter / ダブルクリック: 選択アイテムをペースト
+    /// マルチセレクト時は選択順にテキストを結合してペーストする。
     private func selectCurrentItem() {
-        guard let clipItem = selectedClipItem() else { return }
         let app = previousApp
-        // dismiss() 内の previousApp?.activate() で二重に activate されるのを防ぐ
         previousApp = nil
-        dismiss()
-        onPaste?(clipItem, app)
+
+        if orderedSelection.count >= 2 {
+            // マルチセレクト: 選択順に ClipItem を収集
+            let items: [ClipItem] = orderedSelection.compactMap { idx in
+                guard idx >= 0, idx < filteredItems.count else { return nil }
+                switch filteredItems[idx] {
+                case .clip(let clipItem): return clipItem
+                case .snippet(let snippet): return ClipItem(text: snippet.content)
+                }
+            }
+            guard !items.isEmpty else { return }
+            dismiss()
+            onMultiPaste?(items, app)
+        } else {
+            guard let clipItem = selectedClipItem() else { return }
+            dismiss()
+            onPaste?(clipItem, app)
+        }
     }
 
     /// Cmd+C: 選択アイテムをクリップボードにコピー（ペーストはしない）
@@ -847,8 +980,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     private func moveSelection(by delta: Int) {
         guard !filteredItems.isEmpty else { return }
-        var newRow = tableView.selectedRow + delta
+        let baseRow = orderedSelection.last ?? tableView.selectedRow
+        var newRow = baseRow + delta
         newRow = max(0, min(newRow, filteredItems.count - 1))
+        orderedSelection = [newRow]
         tableView.selectRowIndexes(IndexSet(integer: newRow), byExtendingSelection: false)
         tableView.scrollRowToVisible(newRow)
         updateQuickLookContent()
@@ -887,8 +1022,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     /// Quick Look パネルに表示する内容を設定する。
+    /// マルチセレクト時は最後に選択したアイテムをプレビューする。
     private func setQuickLookContent(_ panel: QuickLookPanel) {
-        let row = tableView.selectedRow
+        let row = orderedSelection.last ?? tableView.selectedRow
         guard row >= 0, row < filteredItems.count else { return }
 
         let item = filteredItems[row]
@@ -937,7 +1073,109 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         clipView.setBoundsOrigin(origin)
     }
 
+    // MARK: - Selection badge
+
+    private static let selBadgeTag = 999
+
+    /// 選択順バッジの画像を生成する。円の中央に番号を描画。
+    private func makeSelectionBadgeImage(number: Int) -> NSImage {
+        let size = Layout.selBadgeSize
+        return NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            NSColor.systemBlue.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+
+            let text = "\(number)"
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: Layout.selBadgeFontSize, weight: .bold),
+                .foregroundColor: NSColor.white,
+            ]
+            let textSize = (text as NSString).size(withAttributes: attrs)
+            let textRect = NSRect(
+                x: (size - textSize.width) / 2,
+                y: (size - textSize.height) / 2,
+                width: textSize.width,
+                height: textSize.height
+            )
+            (text as NSString).draw(in: textRect, withAttributes: attrs)
+            return true
+        }
+    }
+
+    /// セルに選択順バッジを配置する。既存のバッジがあれば再利用する。
+    private func configureSelectionBadge(in cellView: NSView, row: Int) {
+        let badge: NSImageView
+        if let existing = cellView.viewWithTag(Self.selBadgeTag) as? NSImageView {
+            badge = existing
+        } else {
+            badge = NSImageView()
+            badge.tag = Self.selBadgeTag
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(badge)
+            NSLayoutConstraint.activate([
+                badge.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -Layout.selBadgeTrailing),
+                badge.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
+                badge.widthAnchor.constraint(equalToConstant: Layout.selBadgeSize),
+                badge.heightAnchor.constraint(equalToConstant: Layout.selBadgeSize),
+            ])
+        }
+
+        if isManualMultiSelect, let order = orderedSelection.firstIndex(of: row) {
+            badge.image = makeSelectionBadgeImage(number: order + 1)
+            badge.isHidden = false
+        } else {
+            badge.isHidden = true
+        }
+    }
+
+    /// 可視行のバッジだけを更新する（パフォーマンス考慮）
+    private func updateSelectionBadges() {
+        tableView.enumerateAvailableRowViews { rowView, row in
+            for col in 0..<rowView.numberOfColumns {
+                if let cellView = rowView.view(atColumn: col) as? NSView {
+                    self.configureSelectionBadge(in: cellView, row: row)
+                }
+            }
+        }
+    }
+
     // MARK: - Helpers
+
+    /// SearchResultItem を D&D 用の NSPasteboardWriting に変換する。
+    private func pasteboardWriter(for item: SearchResultItem) -> NSPasteboardWriting? {
+        switch item {
+        case .clip(let clipItem):
+            switch clipItem.content {
+            case .text(let text):
+                return text as NSString
+            case .image(let meta):
+                guard imageStore != nil else { return nil }
+                return dragURL(for: meta) as NSURL
+            }
+        case .snippet(let snippet):
+            return snippet.content as NSString
+        }
+    }
+
+    /// D&D 用の URL を返す。元ファイル名がある場合は一時ディレクトリに
+    /// ハードコピーを作成して元のファイル名を保持する。
+    /// コピーに失敗した場合は元の UUID ファイルにフォールバックする。
+    private func dragURL(for meta: ImageMetadata) -> URL {
+        guard let store = imageStore else { return URL(fileURLWithPath: "/") }
+        let sourceURL = store.imageURL(for: meta.fileName)
+        guard let originalName = meta.originalFileName else { return sourceURL }
+
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: Self.dragTempDir, withIntermediateDirectories: true)
+            let copyURL = Self.dragTempDir.appendingPathComponent(originalName)
+            try? fm.removeItem(at: copyURL)
+            try fm.copyItem(at: sourceURL, to: copyURL)
+            return copyURL
+        } catch {
+            NSLog("FuzzyPaste: dragURL copy failed: \(error)")
+            return sourceURL
+        }
+    }
 
     /// ファイルサイズを人間が読みやすい形式にフォーマット。
     private func formatFileSize(_ bytes: Int64) -> String {
