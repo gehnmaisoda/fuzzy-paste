@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupHotkey()
         observeWindowSizePreset()
         observeMaxHistoryCount()
+        observeHotkeyConfig()
     }
 
     // MARK: - ストア初期化
@@ -77,7 +78,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager.onHotkey = { [weak self] in
             self?.toggleSearchWindow()
         }
-        hotkeyManager.register()
+        let config = preferencesStore.hotkeyConfig
+        hotkeyManager.register(keyCode: config.keyCode, modifiers: config.carbonModifiers)
     }
 
     // MARK: - 設定変更監視
@@ -98,6 +100,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.historyStore.setMaxItems(count)
             }
             .store(in: &cancellables)
+    }
+
+    private func observeHotkeyConfig() {
+        preferencesStore.$hotkeyConfig
+            .dropFirst()
+            .sink { [weak self] config in
+                guard let self else { return }
+                // 録音中は再登録しない（stopRecording で再登録される）
+                guard !self.preferencesStore.isRecordingHotkey else { return }
+                self.hotkeyManager.unregister()
+                self.hotkeyManager.register(keyCode: config.keyCode, modifiers: config.carbonModifiers)
+            }
+            .store(in: &cancellables)
+
+        // 録音開始・終了時の同期コールバック（Combine 経由だとタイミング問題があるため直接呼ぶ）
+        preferencesStore.onPauseHotkey = { [weak self] in
+            self?.hotkeyManager.unregister()
+        }
+        preferencesStore.onResumeHotkey = { [weak self] in
+            guard let self else { return }
+            let config = self.preferencesStore.hotkeyConfig
+            self.hotkeyManager.register(keyCode: config.keyCode, modifiers: config.carbonModifiers)
+        }
     }
 
     // MARK: - 検索ウィンドウ

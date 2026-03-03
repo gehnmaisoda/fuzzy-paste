@@ -2,6 +2,7 @@ import SwiftUI
 
 /// 設定画面のタブ。case を追加するだけで新しいタブが増える。
 private enum PreferencesTab: String, CaseIterable, Identifiable {
+    case hotkey = "ホットキー"
     case windowSize = "ウィンドウサイズ"
     case history = "履歴"
     case excludedApps = "除外アプリ"
@@ -10,6 +11,7 @@ private enum PreferencesTab: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .hotkey: return "keyboard"
         case .windowSize: return "macwindow"
         case .history: return "clock.arrow.circlepath"
         case .excludedApps: return "hand.raised"
@@ -22,7 +24,7 @@ private enum PreferencesTab: String, CaseIterable, Identifiable {
 struct PreferencesView: View {
     let store: PreferencesStore
     let historyStore: HistoryStore
-    @State private var selectedTab: PreferencesTab = .windowSize
+    @State private var selectedTab: PreferencesTab = .hotkey
 
     var body: some View {
         NavigationSplitView {
@@ -34,6 +36,8 @@ struct PreferencesView: View {
             .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
         } detail: {
             switch selectedTab {
+            case .hotkey:
+                HotkeySettingsView(store: store)
             case .windowSize:
                 WindowSizeSettingsView(store: store)
             case .history:

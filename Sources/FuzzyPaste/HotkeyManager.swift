@@ -1,7 +1,7 @@
 import AppKit
 import Carbon
 
-/// グローバルホットキー (Cmd+Shift+V) の登録・管理を担当。
+/// グローバルホットキーの登録・管理を担当。キーコードと修飾キーは設定から読み込む。
 ///
 /// Carbon の RegisterEventHotKey API を使用。理由:
 /// - NSEvent.addGlobalMonitorForEvents はイベントを「監視」するだけで消費しない。
@@ -17,6 +17,7 @@ final class HotkeyManager {
     private static let hotkeyID: UInt32 = 1
 
     private var hotKeyRef: EventHotKeyRef?
+    private var handlerInstalled = false
     var onHotkey: (() -> Void)?
 
     /// C コールバックからインスタンスにアクセスするための参照。
@@ -24,26 +25,28 @@ final class HotkeyManager {
     /// この static 変数経由でSwiftインスタンスに到達する。
     fileprivate static var instance: HotkeyManager?
 
-    func register() {
+    func register(keyCode: UInt32, modifiers: UInt32) {
         HotkeyManager.instance = self
 
-        // キーボードイベントハンドラをインストール
-        var eventType = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
-        let handlerStatus = InstallEventHandler(
-            GetApplicationEventTarget(), hotKeyHandler, 1, &eventType, nil, nil
-        )
-        if handlerStatus != noErr {
-            NSLog("[FuzzyPaste] Failed to install event handler: \(handlerStatus)")
+        // キーボードイベントハンドラをインストール（初回のみ）
+        if !handlerInstalled {
+            var eventType = EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind: UInt32(kEventHotKeyPressed)
+            )
+            let handlerStatus = InstallEventHandler(
+                GetApplicationEventTarget(), hotKeyHandler, 1, &eventType, nil, nil
+            )
+            if handlerStatus != noErr {
+                NSLog("[FuzzyPaste] Failed to install event handler: \(handlerStatus)")
+            }
+            handlerInstalled = true
         }
 
-        // Cmd+Shift+V をグローバルホットキーとして登録
+        // 指定されたキーコード・修飾キーでグローバルホットキーを登録
         let hotKeyID = EventHotKeyID(signature: Self.hotkeySignature, id: Self.hotkeyID)
-        let modifiers = UInt32(cmdKey | shiftKey)
         let registerStatus = RegisterEventHotKey(
-            UInt32(PasteHelper.vKeyCode), modifiers, hotKeyID,
+            keyCode, modifiers, hotKeyID,
             GetApplicationEventTarget(), 0, &hotKeyRef
         )
         if registerStatus != noErr {
@@ -56,7 +59,6 @@ final class HotkeyManager {
             UnregisterEventHotKey(hotKeyRef)
             self.hotKeyRef = nil
         }
-        HotkeyManager.instance = nil
     }
 }
 
