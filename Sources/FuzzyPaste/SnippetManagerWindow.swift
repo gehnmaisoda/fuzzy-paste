@@ -2,6 +2,107 @@ import AppKit
 import FuzzyPasteCore
 import UniformTypeIdentifiers
 
+/// スニペット一覧の行ビュー。角丸選択ハイライト + ホバーエフェクト。
+/// レイヤーベースで描画し、drawSelection に依存しない。
+@MainActor
+private final class SnippetRowView: NSTableRowView {
+    private static let radius: CGFloat = 6
+    private static let insetH: CGFloat = 6
+    private static let hoverAlpha: CGFloat = 0.07
+    private static let selectionAlpha: CGFloat = 0.15
+
+    private let highlightLayer = CALayer()
+    private let separatorLayer = CALayer()
+
+    var isHovered = false {
+        didSet { if oldValue != isHovered { updateHighlight() } }
+    }
+
+    override var isSelected: Bool {
+        didSet { if oldValue != isSelected { updateHighlight() } }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        highlightLayer.cornerRadius = Self.radius
+        layer?.addSublayer(highlightLayer)
+        separatorLayer.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
+        layer?.addSublayer(separatorLayer)
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        highlightLayer.frame = bounds.insetBy(dx: Self.insetH, dy: 1)
+        separatorLayer.frame = CGRect(x: Self.insetH + 12, y: bounds.maxY - 0.5,
+                                      width: bounds.width - (Self.insetH + 12) * 2, height: 0.5)
+    }
+
+    private func updateHighlight() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if isSelected {
+            highlightLayer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(Self.selectionAlpha).cgColor
+        } else if isHovered {
+            highlightLayer.backgroundColor = NSColor.labelColor.withAlphaComponent(Self.hoverAlpha).cgColor
+        } else {
+            highlightLayer.backgroundColor = nil
+        }
+        CATransaction.commit()
+    }
+
+    // システムのデフォルト描画を無効化
+    override func drawSelection(in dirtyRect: NSRect) {}
+    override func drawBackground(in dirtyRect: NSRect) {}
+}
+
+/// マウスホバーを追跡するテーブルビュー。
+@MainActor
+private final class HoverTrackingTableView: NSTableView {
+    private var hoveredRow: Int = -1
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = hoverTrackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: point)
+        guard row != hoveredRow else { return }
+        if hoveredRow >= 0,
+           let oldRow = rowView(atRow: hoveredRow, makeIfNecessary: false) as? SnippetRowView {
+            oldRow.isHovered = false
+        }
+        hoveredRow = row
+        if row >= 0,
+           let newRow = rowView(atRow: row, makeIfNecessary: false) as? SnippetRowView {
+            newRow.isHovered = true
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        clearHover()
+    }
+
+    func clearHover() {
+        if hoveredRow >= 0,
+           let oldRow = rowView(atRow: hoveredRow, makeIfNecessary: false) as? SnippetRowView {
+            oldRow.isHovered = false
+        }
+        hoveredRow = -1
+    }
+}
+
 /// クリックを透過するプレースホルダーラベル。
 /// テキストビューの上に重ねてもクリックがテキストビューに到達する。
 @MainActor
@@ -51,7 +152,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         static let inputCornerRadius: CGFloat = 6
         static let inputBorderWidth: CGFloat = 0.5
         static let inputPadding: CGFloat = 8
-        static let toolbarHeight: CGFloat = 24
+        static let toolbarHeight: CGFloat = 28
     }
 
     private enum KeyCode {
@@ -65,13 +166,14 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private enum CellTag {
         static let title = 1
         static let preview = 2
+        static let icon = 3
     }
 
     // MARK: - UI パーツ
 
-    private let tableView = NSTableView()
+    private let tableView = HoverTrackingTableView()
     private let tableScrollView = NSScrollView()
-    private let emptyStateLabel = NSTextField(labelWithString: "")
+    private let emptyStateView = NSView()
     private let titleField = NSTextField()
     private let contentTextView = NSTextView(frame: .zero)
     private let contentScrollView = NSScrollView()
@@ -115,6 +217,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         bg.wantsLayer = true
         bg.layer?.cornerRadius = Layout.cornerRadius
         bg.layer?.masksToBounds = true
+        bg.layer?.borderWidth = 0.5
+        bg.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
         contentView = bg
 
         let header = buildHeader(in: bg)
@@ -147,15 +251,14 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: ヘッダー
 
     private func buildHeader(in container: NSView) -> NSView {
-        let titleStr = NSMutableAttributedString()
-        titleStr.append(NSAttributedString(string: "★ ", attributes: [
-            .foregroundColor: NSColor.systemOrange,
-            .font: NSFont.systemFont(ofSize: Layout.headerFontSize, weight: .bold),
-        ]))
-        titleStr.append(NSAttributedString(string: "スニペット管理", attributes: [
-            .font: NSFont.systemFont(ofSize: Layout.headerFontSize, weight: .bold),
-        ]))
-        let titleLabel = NSTextField(labelWithAttributedString: titleStr)
+        let headerIcon = NSImageView()
+        headerIcon.image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: nil)
+        headerIcon.contentTintColor = .systemOrange
+        headerIcon.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(headerIcon)
+
+        let titleLabel = NSTextField(labelWithString: "スニペット管理")
+        titleLabel.font = .systemFont(ofSize: Layout.headerFontSize, weight: .bold)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(titleLabel)
 
@@ -166,8 +269,13 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         container.addSubview(subtitle)
 
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.padding + 8),
-            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Layout.padding),
+            headerIcon.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.padding + 10),
+            headerIcon.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Layout.padding),
+            headerIcon.widthAnchor.constraint(equalToConstant: 18),
+            headerIcon.heightAnchor.constraint(equalToConstant: 18),
+
+            titleLabel.centerYAnchor.constraint(equalTo: headerIcon.centerYAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: headerIcon.trailingAnchor, constant: 6),
 
             subtitle.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
             subtitle.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Layout.padding),
@@ -187,7 +295,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         tableWrapper.wantsLayer = true
         tableWrapper.layer?.cornerRadius = 8
         tableWrapper.layer?.borderWidth = Layout.inputBorderWidth
-        tableWrapper.layer?.borderColor = NSColor.separatorColor.cgColor
+        tableWrapper.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
         tableWrapper.layer?.masksToBounds = true
         tableWrapper.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(tableWrapper)
@@ -201,9 +309,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         tableView.delegate = self
         tableView.rowHeight = Layout.rowHeight
         tableView.backgroundColor = .clear
-        tableView.selectionHighlightStyle = .regular
+        tableView.selectionHighlightStyle = .none
         tableView.intercellSpacing = NSSize(width: 0, height: 2)
-        tableView.style = .inset
 
         tableScrollView.documentView = tableView
         tableScrollView.hasVerticalScroller = true
@@ -231,34 +338,42 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         tableWrapper.addSubview(actionButton)
 
         // ── 空状態メッセージ ──
-        let emptyStr = NSMutableAttributedString()
-        let pStyle = NSMutableParagraphStyle()
-        pStyle.alignment = .center
-        pStyle.lineSpacing = 4
+        emptyStateView.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.isHidden = true
+        panel.addSubview(emptyStateView)
 
-        emptyStr.append(NSAttributedString(string: "★\n", attributes: [
-            .foregroundColor: NSColor.systemOrange.withAlphaComponent(0.25),
-            .font: NSFont.systemFont(ofSize: 36, weight: .light),
-            .paragraphStyle: pStyle,
-        ]))
-        emptyStr.append(NSAttributedString(string: "スニペットはまだありません\n", attributes: [
-            .foregroundColor: NSColor.tertiaryLabelColor,
-            .font: NSFont.systemFont(ofSize: 12, weight: .light),
-            .paragraphStyle: pStyle,
-        ]))
-        emptyStr.append(NSAttributedString(string: "＋ ボタンで登録", attributes: [
-            .foregroundColor: NSColor.tertiaryLabelColor,
-            .font: NSFont.systemFont(ofSize: 11),
-            .paragraphStyle: pStyle,
-        ]))
+        let emptyIcon = NSImageView()
+        emptyIcon.image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: nil)
+        emptyIcon.contentTintColor = NSColor.systemOrange.withAlphaComponent(0.25)
+        emptyIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 32, weight: .light)
+        emptyIcon.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.addSubview(emptyIcon)
 
-        emptyStateLabel.attributedStringValue = emptyStr
-        emptyStateLabel.alignment = .center
-        emptyStateLabel.maximumNumberOfLines = 0
-        emptyStateLabel.lineBreakMode = .byWordWrapping
-        emptyStateLabel.isHidden = true
-        emptyStateLabel.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(emptyStateLabel)
+        let emptyTitle = NSTextField(labelWithString: "スニペットはまだありません")
+        emptyTitle.font = .systemFont(ofSize: Layout.subtitleFontSize, weight: .light)
+        emptyTitle.textColor = .tertiaryLabelColor
+        emptyTitle.alignment = .center
+        emptyTitle.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.addSubview(emptyTitle)
+
+        let emptyHint = NSTextField(labelWithString: "＋ ボタンで登録")
+        emptyHint.font = .systemFont(ofSize: Layout.labelFontSize)
+        emptyHint.textColor = .tertiaryLabelColor
+        emptyHint.alignment = .center
+        emptyHint.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.addSubview(emptyHint)
+
+        NSLayoutConstraint.activate([
+            emptyIcon.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
+            emptyIcon.topAnchor.constraint(equalTo: emptyStateView.topAnchor),
+
+            emptyTitle.topAnchor.constraint(equalTo: emptyIcon.bottomAnchor, constant: 8),
+            emptyTitle.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
+
+            emptyHint.topAnchor.constraint(equalTo: emptyTitle.bottomAnchor, constant: 4),
+            emptyHint.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
+            emptyHint.bottomAnchor.constraint(equalTo: emptyStateView.bottomAnchor),
+        ])
 
         NSLayoutConstraint.activate([
             listLabel.topAnchor.constraint(equalTo: panel.topAnchor),
@@ -294,9 +409,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             actionButton.heightAnchor.constraint(equalToConstant: Layout.toolbarHeight),
             actionButton.widthAnchor.constraint(equalToConstant: Layout.toolbarHeight),
 
-            emptyStateLabel.centerXAnchor.constraint(equalTo: tableScrollView.centerXAnchor),
-            emptyStateLabel.centerYAnchor.constraint(equalTo: tableScrollView.centerYAnchor),
-            emptyStateLabel.widthAnchor.constraint(lessThanOrEqualTo: tableScrollView.widthAnchor, constant: -16),
+            emptyStateView.centerXAnchor.constraint(equalTo: tableScrollView.centerXAnchor),
+            emptyStateView.centerYAnchor.constraint(equalTo: tableScrollView.centerYAnchor),
         ])
     }
 
@@ -328,6 +442,14 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             guard let self, !self.isUpdatingFields else { return }
             self.saveCurrentEdits()
         }
+        tagContainer.onTabOut = { [weak self] in
+            guard let self else { return }
+            self.makeFirstResponder(self.contentTextView)
+        }
+        tagContainer.onBackTabOut = { [weak self] in
+            guard let self else { return }
+            self.makeFirstResponder(self.titleField)
+        }
         panel.addSubview(tagContainer)
 
         // ── 内容 ──
@@ -339,7 +461,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         panel.addSubview(contentWrapper)
 
         // プレースホルダー（スクロールビューの下に配置し透過背景で見えるようにする）
-        contentPlaceholder.font = .monospacedSystemFont(ofSize: Layout.fieldFontSize, weight: .regular)
+        contentPlaceholder.font = .systemFont(ofSize: Layout.fieldFontSize)
         contentPlaceholder.textColor = .placeholderTextColor
         contentPlaceholder.isHidden = true
         contentPlaceholder.translatesAutoresizingMaskIntoConstraints = false
@@ -418,8 +540,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         view.wantsLayer = true
         view.layer?.cornerRadius = Layout.inputCornerRadius
         view.layer?.borderWidth = Layout.inputBorderWidth
-        view.layer?.borderColor = NSColor.separatorColor.cgColor
-        view.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
+        view.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }
@@ -427,8 +549,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     /// ツールバー用ボーダレスアイコンボタンを設定するヘルパー
     private func configureToolbarButton(_ button: NSButton, symbol: String, toolTip: String, action: Selector) {
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: toolTip)
-        button.bezelStyle = .smallSquare
-        button.isBordered = false
+        button.bezelStyle = .recessed
+        button.showsBorderOnlyWhileMouseInside = true
         button.imagePosition = .imageOnly
         button.target = self
         button.action = action
@@ -521,18 +643,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
         let item = store.items[row]
 
-        // ── 1行目: ★ タイトル ──
-        let titleStr = NSMutableAttributedString()
-        titleStr.append(NSAttributedString(string: "★ ", attributes: [
-            .foregroundColor: NSColor.systemOrange.withAlphaComponent(0.8),
-            .font: NSFont.systemFont(ofSize: Layout.cellTitleFontSize, weight: .medium),
-        ]))
+        // ── 1行目: タイトル ──
         let name = item.title.isEmpty ? "名称未設定" : item.title
-        titleStr.append(NSAttributedString(string: name, attributes: [
-            .font: NSFont.systemFont(ofSize: Layout.cellTitleFontSize, weight: .medium),
-            .foregroundColor: item.title.isEmpty ? NSColor.tertiaryLabelColor : NSColor.labelColor,
-        ]))
-        titleTF.attributedStringValue = titleStr
+        titleTF.stringValue = name
+        titleTF.font = .systemFont(ofSize: Layout.cellTitleFontSize, weight: .medium)
+        titleTF.textColor = item.title.isEmpty ? .tertiaryLabelColor : .labelColor
 
         // ── 2行目: 内容プレビュー ──
         if item.content.isEmpty {
@@ -553,6 +668,13 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         let view = NSView()
         view.identifier = identifier
 
+        let iconView = NSImageView()
+        iconView.tag = CellTag.icon
+        iconView.image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: nil)
+        iconView.contentTintColor = NSColor.systemOrange.withAlphaComponent(0.7)
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(iconView)
+
         let titleTF = NSTextField(labelWithString: "")
         titleTF.tag = CellTag.title
         titleTF.lineBreakMode = .byTruncatingTail
@@ -568,15 +690,31 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         view.addSubview(previewTF)
 
         NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            iconView.topAnchor.constraint(equalTo: view.topAnchor, constant: 9),
+            iconView.widthAnchor.constraint(equalToConstant: 14),
+            iconView.heightAnchor.constraint(equalToConstant: 14),
+
             titleTF.topAnchor.constraint(equalTo: view.topAnchor, constant: 7),
-            titleTF.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            titleTF.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
             titleTF.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
 
             previewTF.topAnchor.constraint(equalTo: titleTF.bottomAnchor, constant: 1),
-            previewTF.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            previewTF.leadingAnchor.constraint(equalTo: titleTF.leadingAnchor),
             previewTF.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
         ])
         return view
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let id = NSUserInterfaceItemIdentifier("SnippetRow")
+        if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? SnippetRowView {
+            existing.isHovered = false
+            return existing
+        }
+        let rowView = SnippetRowView()
+        rowView.identifier = id
+        return rowView
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -626,7 +764,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     }
 
     private func updateEmptyState() {
-        emptyStateLabel.isHidden = !store.items.isEmpty
+        emptyStateView.isHidden = !store.items.isEmpty
     }
 
     // MARK: - NSTextFieldDelegate
@@ -634,6 +772,15 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     func controlTextDidChange(_ obj: Notification) {
         guard !isUpdatingFields else { return }
         saveCurrentEdits()
+    }
+
+    /// titleField の Tab でタグフィールドに移動
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertTab(_:)) {
+            tagContainer.focusInputField()
+            return true
+        }
+        return false
     }
 
     // MARK: - NSTextViewDelegate
@@ -654,10 +801,10 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         return true
     }
 
-    /// Shift+Tab で内容フィールドからタイトルフィールドにフォーカスを戻す
+    /// Shift+Tab で内容フィールドからタグフィールドにフォーカスを戻す
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.insertBacktab(_:)) {
-            makeFirstResponder(titleField)
+            tagContainer.focusInputField()
             return true
         }
         return false
