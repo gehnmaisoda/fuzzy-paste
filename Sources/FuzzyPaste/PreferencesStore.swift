@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import Combine
+import FuzzyPasteCore
 
 /// ホットキーの設定。キーコードと修飾キーの組み合わせを保持する。
 struct HotkeyConfig: Codable, Sendable, Equatable {
@@ -166,7 +167,7 @@ private struct Preferences: Codable, Sendable {
 @MainActor
 final class PreferencesStore: ObservableObject {
     /// 履歴の最大保持件数のデフォルト値。
-    nonisolated static let defaultMaxHistoryCount = 500
+    nonisolated static let defaultMaxHistoryCount = HistoryStore.defaultMaxHistoryCount
     /// 履歴の最大保持件数の選択肢。
     nonisolated static let maxHistoryCountOptions = [100, 300, 500, 1000, 2000]
 

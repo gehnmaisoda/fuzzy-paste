@@ -1,4 +1,5 @@
 import AppKit
+import FuzzyPasteCore
 import SwiftUI
 
 /// 設定ウィンドウ。NSHostingView で SwiftUI の PreferencesView をホストする。

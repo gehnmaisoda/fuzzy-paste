@@ -1,3 +1,4 @@
+import FuzzyPasteCore
 import SwiftUI
 
 /// 設定画面のタブ。case を追加するだけで新しいタブが増える。
