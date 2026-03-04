@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var snippetManagerWindow: SnippetManagerWindow?
     private var preferencesWindow: PreferencesWindow?
     private var onboardingWindow: OnboardingWindow?
+    private var dynamicSnippetWindow: DynamicSnippetWindow?
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -231,7 +232,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onOpenPreferences = { [weak self] in
             self?.showPreferences()
         }
+        window.onDynamicSnippetPaste = { [weak self] snippet, previousApp in
+            self?.showDynamicSnippetDialog(snippet: snippet, previousApp: previousApp)
+        }
         return window
+    }
+
+    // MARK: - 動的スニペット
+
+    private func showDynamicSnippetDialog(snippet: SnippetItem, previousApp: NSRunningApplication?) {
+        let names = PlaceholderParser.extractPlaceholderNames(from: snippet.content)
+        guard !names.isEmpty else { return }
+
+        let window = DynamicSnippetWindow(snippet: snippet, placeholderNames: names)
+        window.onPaste = { [weak self] resolvedText in
+            guard let self else { return }
+            self.clipboardMonitor.ignoreNextChange()
+            PasteHelper.paste(resolvedText, previousApp: previousApp)
+            self.dynamicSnippetWindow = nil
+        }
+        window.onCopy = { [weak self] resolvedText in
+            guard let self else { return }
+            self.clipboardMonitor.ignoreNextChange()
+            PasteHelper.copyToClipboard(resolvedText)
+            self.dynamicSnippetWindow = nil
+        }
+        window.onCancel = { [weak self] in
+            guard let self else { return }
+            self.dynamicSnippetWindow = nil
+            // 検索ウィンドウを再表示し、previousApp を復元
+            self.toggleSearchWindow()
+            self.searchWindow?.restorePreviousApp(previousApp)
+        }
+        dynamicSnippetWindow = window
+        window.showCentered()
     }
 
     // MARK: - スニペット管理
