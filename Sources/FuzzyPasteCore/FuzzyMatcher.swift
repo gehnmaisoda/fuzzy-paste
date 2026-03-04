@@ -108,11 +108,18 @@ public enum FuzzyMatcher {
         return scored.sorted { $0.score > $1.score }.map(\.item)
     }
 
+    /// スニペットのタイトルマッチに加算するボーナス倍率。
+    /// クエリ長 × この値を加算し、スニペットが優先的にヒットするようにする。
+    private static let snippetTitleBonus = 3
+
     /// スニペットの title, content, tags からベストスコアを返す。
+    /// タイトルマッチにはボーナスを加算し、スニペットが優先的にヒットするようにする。
     /// CLI の検索機能でも使用するため public。
     public static func bestSnippetScore(query: String, snippet: SnippetItem) -> Int? {
+        let titleScore: Int? = match(query: query, target: snippet.title)
+            .map { $0 + query.count * snippetTitleBonus }
         var scores: [Int?] = [
-            match(query: query, target: snippet.title),
+            titleScore,
             match(query: query, target: snippet.content),
         ]
         for tag in snippet.tags {

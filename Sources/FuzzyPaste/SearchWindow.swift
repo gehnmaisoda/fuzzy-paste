@@ -197,7 +197,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private var suggestedTag: String?
 
     /// ウィンドウを開く直前にアクティブだったアプリ。ペースト先として使用。
-    private var previousApp: NSRunningApplication?
+    private(set) var previousApp: NSRunningApplication?
     /// Enter で選択 → ペースト実行（ClipItem ベース）
     var onPaste: ((ClipItem, NSRunningApplication?) -> Void)?
     /// マルチセレクト時のペースト（選択順の ClipItem 配列）
@@ -208,6 +208,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     var onOpenSnippetManager: (() -> Void)?
     /// Cmd+, で設定ウィンドウを開く
     var onOpenPreferences: (() -> Void)?
+    /// 動的スニペット（プレースホルダー付き）選択時のコールバック
+    var onDynamicSnippetPaste: ((SnippetItem, NSRunningApplication?) -> Void)?
 
     init(layout: LayoutConfig = .preset(.medium)) {
         self.layout = layout
@@ -501,6 +503,11 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     // MARK: - Show / Dismiss
+
+    /// 動的スニペットのキャンセル時に、元のペースト先アプリを復元する。
+    func restorePreviousApp(_ app: NSRunningApplication?) {
+        previousApp = app
+    }
 
     func show(clips: [ClipItem], snippets: [SnippetItem], imageStore: ImageStore, fileStore: FileStore, allTags: [String]) {
         // 前回のドラッグ用一時ファイルをクリーンアップ
@@ -1250,6 +1257,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         attrStr.append(NSAttributedString(string: snippet.title, attributes: [
             .font: NSFont.systemFont(ofSize: layout.cellFontSize, weight: .medium),
         ]))
+        if PlaceholderParser.hasDynamicPlaceholders(in: snippet.content) {
+            attrStr.append(NSAttributedString(string: " "))
+            attrStr.append(accentBadgeAttachment(text: "{ }"))
+        }
         for tag in snippet.tags {
             attrStr.append(NSAttributedString(string: " "))
             attrStr.append(tagBadgeAttachment(text: tag))
@@ -1268,13 +1279,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         return cellView
     }
 
-    /// タグのピル型バッジを NSTextAttachment として生成する。
+    /// ピル型バッジを NSTextAttachment として生成する。
     /// NSAttributedString にインラインで埋め込める画像を返す。
-    private func tagBadgeAttachment(text: String) -> NSAttributedString {
-        let font = NSFont.systemFont(ofSize: layout.badgeFontSize, weight: .medium)
-        let textColor = NSColor.secondaryLabelColor
-        let bgColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.2)
-
+    private func badgeAttachment(text: String, font: NSFont, textColor: NSColor, bgColor: NSColor) -> NSAttributedString {
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
         let textSize = (text as NSString).size(withAttributes: attrs)
         let badgeSize = NSSize(
@@ -1300,6 +1307,26 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let baselineOffset = (layout.cellFontSize - badgeSize.height) / 2 - 1
         attachment.bounds = NSRect(x: 0, y: baselineOffset, width: badgeSize.width, height: badgeSize.height)
         return NSAttributedString(attachment: attachment)
+    }
+
+    /// アクセントカラーのバッジ（動的スニペットの `{ }` 表示用）。
+    private func accentBadgeAttachment(text: String) -> NSAttributedString {
+        badgeAttachment(
+            text: text,
+            font: .systemFont(ofSize: layout.badgeFontSize, weight: .semibold),
+            textColor: .controlAccentColor,
+            bgColor: .controlAccentColor.withAlphaComponent(0.12)
+        )
+    }
+
+    /// タグのピル型バッジ。
+    private func tagBadgeAttachment(text: String) -> NSAttributedString {
+        badgeAttachment(
+            text: text,
+            font: .systemFont(ofSize: layout.badgeFontSize, weight: .medium),
+            textColor: .secondaryLabelColor,
+            bgColor: .tertiaryLabelColor.withAlphaComponent(0.2)
+        )
     }
 
     // MARK: - Actions
@@ -1341,6 +1368,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             dismiss()
             onMultiPaste?(items, app)
         } else {
+            // 動的スニペット判定: プレースホルダー付きスニペットは専用ダイアログへ
+            let row = tableView.selectedRow
+            if row >= 0, row < filteredItems.count,
+               case .snippet(let snippet) = filteredItems[row],
+               PlaceholderParser.hasDynamicPlaceholders(in: snippet.content) {
+                dismiss()
+                onDynamicSnippetPaste?(snippet, app)
+                return
+            }
             guard let clipItem = selectedClipItem() else { return }
             dismiss()
             onPaste?(clipItem, app)
