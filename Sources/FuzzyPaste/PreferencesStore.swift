@@ -80,7 +80,7 @@ struct LayoutConfig: Sendable {
     let hintBarHeight: CGFloat
 
     // 固定値
-    let cornerRadius: CGFloat = 12
+    let cornerRadius: CGFloat = 14
     let windowPadding: CGFloat = 12
     let cellPadding: CGFloat = 16
     let iconSize: CGFloat = 20
@@ -103,21 +103,21 @@ struct LayoutConfig: Sendable {
                 windowSize: NSSize(width: 480, height: 340),
                 rowHeight: 30, snippetRowHeight: 46, imageRowHeight: 64,
                 thumbSize: 48, searchFontSize: 16, cellFontSize: 12,
-                hintFontSize: 10, searchHeight: 32, hintBarHeight: 24
+                hintFontSize: 10, searchHeight: 32, hintBarHeight: 28
             )
         case .medium:
             return LayoutConfig(
                 windowSize: NSSize(width: 600, height: 420),
                 rowHeight: 36, snippetRowHeight: 56, imageRowHeight: 80,
                 thumbSize: 64, searchFontSize: 18, cellFontSize: 13,
-                hintFontSize: 11, searchHeight: 36, hintBarHeight: 28
+                hintFontSize: 11, searchHeight: 36, hintBarHeight: 32
             )
         case .large:
             return LayoutConfig(
                 windowSize: NSSize(width: 760, height: 540),
                 rowHeight: 42, snippetRowHeight: 66, imageRowHeight: 100,
                 thumbSize: 84, searchFontSize: 20, cellFontSize: 14,
-                hintFontSize: 12, searchHeight: 40, hintBarHeight: 32
+                hintFontSize: 12, searchHeight: 40, hintBarHeight: 36
             )
         }
     }
