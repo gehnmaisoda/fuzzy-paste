@@ -50,6 +50,7 @@ private final class NonFocusTableView: NSTableView {
     var onMultiSelectClick: ((Int) -> Void)?
 
     private var hoveredRow: Int = -1
+    private var hoverTrackingArea: NSTrackingArea?
 
     override func mouseDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -67,11 +68,13 @@ private final class NonFocusTableView: NSTableView {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        for area in trackingAreas { removeTrackingArea(area) }
-        addTrackingArea(NSTrackingArea(
+        if let existing = hoverTrackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
             rect: bounds,
             options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
-            owner: self, userInfo: nil))
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverTrackingArea = area
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -90,6 +93,11 @@ private final class NonFocusTableView: NSTableView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        clearHover()
+    }
+
+    /// ホバー状態をリセットする。データ再読み込み時にも呼ばれる。
+    func clearHover() {
         if hoveredRow >= 0,
            let oldRow = rowView(atRow: hoveredRow, makeIfNecessary: false) as? ModernRowView {
             oldRow.isHovered = false
@@ -426,6 +434,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 ("⌘\u{2009}C", "コピー"),
                 ("⌘\u{2009}Click", "複数選択"),
                 ("⇧\u{2009}Space", "プレビュー"),
+                ("⌘\u{2009}E", "スニペット管理"),
             ]
         }
         if suggestedTag != nil {
@@ -512,6 +521,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         isDragging = false
         isDismissing = false
         filteredItems = FuzzyMatcher.filterMixed(query: "", clips: clips, snippets: snippets)
+        (tableView as? NonFocusTableView)?.clearHover()
         tableView.reloadData()
         tableView.scrollRowToVisible(0)
         emptyStateView.isHidden = true
@@ -759,6 +769,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let query = searchField.stringValue
         orderedSelection = []
         filteredItems = FuzzyMatcher.filterMixed(query: query, clips: allClips, snippets: allSnippets, tagFilters: activeTagFilters)
+        (tableView as? NonFocusTableView)?.clearHover()
         tableView.reloadData()
 
         let isEmpty = filteredItems.isEmpty
@@ -896,6 +907,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let id = NSUserInterfaceItemIdentifier("ModernRow")
         if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? ModernRowView {
+            existing.isHovered = false
             return existing
         }
         let rowView = ModernRowView()
@@ -1167,7 +1179,6 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let id = Self.snippetCellID
         let topTag = 200
         let bottomTag = 201
-        let snippetTimeTag = 501
 
         let topLabel: NSTextField
         let bottomLabel: NSTextField
@@ -1177,7 +1188,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         if let existing = tableView.makeView(withIdentifier: id, owner: nil),
            let existingTop = existing.viewWithTag(topTag) as? NSTextField,
            let existingBottom = existing.viewWithTag(bottomTag) as? NSTextField,
-           let existingTime = existing.viewWithTag(snippetTimeTag) as? NSTextField {
+           let existingTime = existing.viewWithTag(Self.timestampTag) as? NSTextField {
             topLabel = existingTop
             bottomLabel = existingBottom
             timeLabel = existingTime
@@ -1195,7 +1206,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             cellView.addSubview(topLabel)
 
             timeLabel = NSTextField(labelWithString: "")
-            timeLabel.tag = snippetTimeTag
+            timeLabel.tag = Self.timestampTag
             timeLabel.font = .systemFont(ofSize: layout.cellFontSize - 2)
             timeLabel.textColor = .tertiaryLabelColor
             timeLabel.alignment = .right
