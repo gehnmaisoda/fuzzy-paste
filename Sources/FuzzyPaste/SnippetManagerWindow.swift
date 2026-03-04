@@ -115,6 +115,10 @@ private final class PlaceholderLabel: NSTextField {
 private final class DropZoneView: NSView {
     enum Kind { case image, file }
 
+    private static let iconSize: CGFloat = 28
+    private static let messageFontSize: CGFloat = 12
+    private static let cornerRadius: CGFloat = 8
+
     var onFileSelected: ((URL) -> Void)?
 
     private let kind: Kind
@@ -150,14 +154,14 @@ private final class DropZoneView: NSView {
         let symbolName = kind == .image ? "photo.badge.plus" : "doc.badge.plus"
         iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
         iconView.contentTintColor = .tertiaryLabelColor
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .light)
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .light)
         iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
 
         // メッセージ
         let msg = kind == .image ? "ここに画像をドラッグ&ドロップ" : "ここにファイルをドラッグ&ドロップ"
         messageLabel.stringValue = msg
-        messageLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        messageLabel.font = .systemFont(ofSize: Self.messageFontSize, weight: .regular)
         messageLabel.textColor = .tertiaryLabelColor
         messageLabel.alignment = .center
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -190,7 +194,7 @@ private final class DropZoneView: NSView {
 
     override func layout() {
         super.layout()
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: Self.cornerRadius, yRadius: Self.cornerRadius)
         dashBorder.path = path.cgPath
         dashBorder.frame = bounds
     }
@@ -322,6 +326,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         static let rowHeight: CGFloat = 48
         static let fieldWrapperHeight: CGFloat = 30
         static let inputCornerRadius: CGFloat = 6
+        static let typeSegmentWidth: CGFloat = 240
         static let inputBorderWidth: CGFloat = 0.5
         static let inputPadding: CGFloat = 8
         static let toolbarHeight: CGFloat = 28
@@ -785,7 +790,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
             typeSegment.topAnchor.constraint(equalTo: typeLabel.bottomAnchor, constant: Layout.spacing),
             typeSegment.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-            typeSegment.widthAnchor.constraint(equalToConstant: 240),
+            typeSegment.widthAnchor.constraint(equalToConstant: Layout.typeSegmentWidth),
 
             contentLabel.topAnchor.constraint(equalTo: typeSegment.bottomAnchor, constant: Layout.sectionSpacing),
             contentLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
@@ -900,10 +905,48 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     }
 
     /// ファイルサイズを読みやすい文字列に変換する
+    private static let byteFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f
+    }()
+
     private func formatFileSize(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: bytes)
+        Self.byteFormatter.string(fromByteCount: bytes)
+    }
+
+    /// コンテンツコンテナの表示を切り替える。3つのコンテナは排他表示。
+    private enum ContentDisplay { case text, imageDropZone, imagePreview, fileDropZone, filePreview }
+
+    private func showContentContainer(_ display: ContentDisplay) {
+        textContentContainer.isHidden = true
+        imageContentContainer.isHidden = true
+        fileContentContainer.isHidden = true
+
+        switch display {
+        case .text:
+            textContentContainer.isHidden = false
+        case .imageDropZone:
+            imageContentContainer.isHidden = false
+            imageDropZone.isHidden = false
+            imagePreviewView.isHidden = true
+            imageInfoLabel.isHidden = true
+        case .imagePreview:
+            imageContentContainer.isHidden = false
+            imageDropZone.isHidden = true
+            imagePreviewView.isHidden = false
+            imageInfoLabel.isHidden = false
+        case .fileDropZone:
+            fileContentContainer.isHidden = false
+            fileDropZone.isHidden = false
+            fileIconView.isHidden = true
+            fileInfoLabel.isHidden = true
+        case .filePreview:
+            fileContentContainer.isHidden = false
+            fileDropZone.isHidden = true
+            fileIconView.isHidden = false
+            fileInfoLabel.isHidden = false
+        }
     }
 
     // MARK: - 表示
@@ -1096,48 +1139,29 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             titleField.isEnabled = true
             removeButton.isEnabled = true
             typeSegment.isEnabled = true
-            switch item.content {
-            case .text: typeSegment.selectedSegment = 0
-            case .image: typeSegment.selectedSegment = 1
-            case .file: typeSegment.selectedSegment = 2
-            }
 
             switch item.content {
             case .text(let text):
-                textContentContainer.isHidden = false
-                imageContentContainer.isHidden = true
-                fileContentContainer.isHidden = true
+                typeSegment.selectedSegment = 0
+                showContentContainer(.text)
                 contentTextView.string = text
                 contentTextView.isEditable = true
                 contentTextView.isSelectable = true
                 contentPlaceholder.isHidden = !text.isEmpty
             case .image(let meta):
-                textContentContainer.isHidden = true
-                imageContentContainer.isHidden = false
-                fileContentContainer.isHidden = true
+                typeSegment.selectedSegment = 1
+                showContentContainer(.imagePreview)
                 contentTextView.isEditable = false
                 contentTextView.isSelectable = false
-                // 画像プレビュー表示、ドロップゾーン非表示
-                imageDropZone.isHidden = true
-                imagePreviewView.isHidden = false
-                imageInfoLabel.isHidden = false
-                if let image = NSImage(contentsOf: imageStore.imageURL(for: meta.fileName)) {
-                    imagePreviewView.image = image
-                } else {
-                    imagePreviewView.image = imageStore.thumbnail(for: meta.fileName)
-                }
+                imagePreviewView.image = NSImage(contentsOf: imageStore.imageURL(for: meta.fileName))
+                    ?? imageStore.thumbnail(for: meta.fileName)
                 let name = meta.originalFileName ?? meta.fileName
                 imageInfoLabel.stringValue = "\(name)  \(meta.pixelWidth)x\(meta.pixelHeight)  \(formatFileSize(meta.fileSizeBytes))"
             case .file(let meta):
-                textContentContainer.isHidden = true
-                imageContentContainer.isHidden = true
-                fileContentContainer.isHidden = false
+                typeSegment.selectedSegment = 2
+                showContentContainer(.filePreview)
                 contentTextView.isEditable = false
                 contentTextView.isSelectable = false
-                // ファイル情報表示、ドロップゾーン非表示
-                fileDropZone.isHidden = true
-                fileIconView.isHidden = false
-                fileInfoLabel.isHidden = false
                 fileIconView.image = fileStore.icon(for: meta)
                 fileInfoLabel.stringValue = "\(meta.originalFileName)\n\(meta.fileExtension.uppercased())  \(formatFileSize(meta.fileSizeBytes))"
             }
@@ -1152,9 +1176,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             typeSegment.isEnabled = false
             typeSegment.selectedSegment = 0
             contentPlaceholder.isHidden = true
-            textContentContainer.isHidden = false
-            imageContentContainer.isHidden = true
-            fileContentContainer.isHidden = true
+            showContentContainer(.text)
         }
         isUpdatingFields = false
     }
@@ -1257,9 +1279,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         let item = store.items[row]
         // ストアが既にテキストでもUI（ドロップゾーン）が出ている場合があるので、常にリセット
         if case .text = item.content {
-            textContentContainer.isHidden = false
-            imageContentContainer.isHidden = true
-            fileContentContainer.isHidden = true
+            showContentContainer(.text)
             updateEditFields()
             return
         }
@@ -1274,14 +1294,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             revertTypeSegment()
             return
         }
-
-        // ドロップゾーンを表示（ファイル選択はドロップゾーン内で行う）
-        textContentContainer.isHidden = true
-        imageContentContainer.isHidden = false
-        fileContentContainer.isHidden = true
-        imageDropZone.isHidden = false
-        imagePreviewView.isHidden = true
-        imageInfoLabel.isHidden = true
+        showContentContainer(.imageDropZone)
     }
 
     private func changeToFile() {
@@ -1290,14 +1303,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             revertTypeSegment()
             return
         }
-
-        // ドロップゾーンを表示（ファイル選択はドロップゾーン内で行う）
-        textContentContainer.isHidden = true
-        imageContentContainer.isHidden = true
-        fileContentContainer.isHidden = false
-        fileDropZone.isHidden = false
-        fileIconView.isHidden = true
-        fileInfoLabel.isHidden = true
+        showContentContainer(.fileDropZone)
     }
 
     /// ファイル選択キャンセル時にセグメントを現在のコンテンツ型に戻す

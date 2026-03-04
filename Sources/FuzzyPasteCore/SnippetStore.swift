@@ -159,7 +159,6 @@ public final class SnippetStore {
     }
 
     /// スニペットを追加する（新しい UUID を割り当て）。
-    /// 注意: インポートはテキストスニペットのみ対応。
     public func importItems(_ newItems: [SnippetItem]) {
         let reassigned = newItems.map {
             SnippetItem(title: $0.title, content: $0.content, tags: $0.tags, createdAt: $0.createdAt)
