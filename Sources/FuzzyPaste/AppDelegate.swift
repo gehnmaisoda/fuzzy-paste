@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var searchWindow: SearchWindow?
     private var snippetManagerWindow: SnippetManagerWindow?
     private var preferencesWindow: PreferencesWindow?
+    private var onboardingWindow: OnboardingWindow?
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -25,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStores()
         setupExcludedApps()
         startClipboardMonitor()
-        setupHotkey()
+        setupHotkeyOrShowOnboarding()
         observeWindowSizePreset()
         observeMaxHistoryCount()
         observeHotkeyConfig()
@@ -72,7 +73,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardMonitor.start()
     }
 
-    // MARK: - グローバルホットキー
+    // MARK: - オンボーディング・ホットキー
+
+    /// 起動時の初期化: オンボーディング未完了なら表示、完了済みならホットキーを登録する。
+    private func setupHotkeyOrShowOnboarding() {
+        if !preferencesStore.hasCompletedOnboarding {
+            showOnboarding()
+            return
+        }
+        setupHotkey()
+    }
 
     private func setupHotkey() {
         hotkeyManager.onHotkey = { [weak self] in
@@ -80,6 +90,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let config = preferencesStore.hotkeyConfig
         hotkeyManager.register(keyCode: config.keyCode, modifiers: config.carbonModifiers)
+    }
+
+    private func showOnboarding() {
+        // 既に表示中ならフォーカスだけ戻す
+        if let existing = onboardingWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let window = OnboardingWindow(store: preferencesStore)
+        onboardingWindow = window
+
+        // 「始める」ボタン経由 → オンボーディング完了 + ホットキー登録
+        window.onDidComplete = { [weak self] in
+            guard let self else { return }
+            self.preferencesStore.completeOnboarding()
+            self.onboardingWindow = nil
+            self.setupHotkey()
+        }
+
+        // 閉じるボタン等 → 完了しない（次回また表示される）
+        window.onDismissed = { [weak self] in
+            self?.onboardingWindow = nil
+        }
+
+        window.showWindow()
     }
 
     // MARK: - 設定変更監視
@@ -130,6 +166,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Cmd+Shift+V で呼ばれるトグル処理。
     /// 表示中なら閉じる、非表示なら開く。
     private func toggleSearchWindow() {
+        // オンボーディング未完了 → オンボーディングを表示
+        if !preferencesStore.hasCompletedOnboarding {
+            showOnboarding()
+            return
+        }
+
         if let window = searchWindow, window.isVisible {
             window.dismiss()
             return
@@ -194,6 +236,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - スニペット管理
 
     private func showSnippetManager() {
+        // オンボーディング未完了 → オンボーディングを表示
+        if !preferencesStore.hasCompletedOnboarding {
+            showOnboarding()
+            return
+        }
+
         let window = snippetManagerWindow ?? SnippetManagerWindow(store: snippetStore)
         snippetManagerWindow = window
         window.showWindow()
@@ -206,6 +254,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 設定
 
     private func showPreferences() {
+        // オンボーディング未完了 → オンボーディングを表示
+        if !preferencesStore.hasCompletedOnboarding {
+            showOnboarding()
+            return
+        }
+
         let window = preferencesWindow ?? PreferencesWindow(store: preferencesStore, historyStore: historyStore)
         preferencesWindow = window
         window.showWindow()
