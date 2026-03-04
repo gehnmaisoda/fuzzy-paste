@@ -139,12 +139,14 @@ private struct Preferences: Codable, Sendable {
     var windowSizePreset: WindowSizePreset = .medium
     var maxHistoryCount: Int = PreferencesStore.defaultMaxHistoryCount
     var hotkeyConfig: HotkeyConfig = .default
+    var hasCompletedOnboarding: Bool = false
 
-    init(excludedApps: [ExcludedApp] = [], windowSizePreset: WindowSizePreset = .medium, maxHistoryCount: Int = PreferencesStore.defaultMaxHistoryCount, hotkeyConfig: HotkeyConfig = .default) {
+    init(excludedApps: [ExcludedApp] = [], windowSizePreset: WindowSizePreset = .medium, maxHistoryCount: Int = PreferencesStore.defaultMaxHistoryCount, hotkeyConfig: HotkeyConfig = .default, hasCompletedOnboarding: Bool = false) {
         self.excludedApps = excludedApps
         self.windowSizePreset = windowSizePreset
         self.maxHistoryCount = maxHistoryCount
         self.hotkeyConfig = hotkeyConfig
+        self.hasCompletedOnboarding = hasCompletedOnboarding
     }
 
     init(from decoder: Decoder) throws {
@@ -153,6 +155,7 @@ private struct Preferences: Codable, Sendable {
         windowSizePreset = try container.decodeIfPresent(WindowSizePreset.self, forKey: .windowSizePreset) ?? .medium
         maxHistoryCount = try container.decodeIfPresent(Int.self, forKey: .maxHistoryCount) ?? PreferencesStore.defaultMaxHistoryCount
         hotkeyConfig = try container.decodeIfPresent(HotkeyConfig.self, forKey: .hotkeyConfig) ?? .default
+        hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
     }
 }
 
@@ -171,6 +174,7 @@ final class PreferencesStore: ObservableObject {
     @Published private(set) var windowSizePreset: WindowSizePreset = .medium
     @Published private(set) var maxHistoryCount: Int = PreferencesStore.defaultMaxHistoryCount
     @Published private(set) var hotkeyConfig: HotkeyConfig = .default
+    @Published private(set) var hasCompletedOnboarding: Bool = false
     /// ホットキー録音中フラグ。
     var isRecordingHotkey = false
     /// ホットキー一時停止・再開コールバック。AppDelegate が設定する。
@@ -224,6 +228,12 @@ final class PreferencesStore: ObservableObject {
         save()
     }
 
+    func completeOnboarding() {
+        guard !hasCompletedOnboarding else { return }
+        hasCompletedOnboarding = true
+        save()
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         let decoder = JSONDecoder()
@@ -233,11 +243,12 @@ final class PreferencesStore: ObservableObject {
             windowSizePreset = prefs.windowSizePreset
             maxHistoryCount = prefs.maxHistoryCount
             hotkeyConfig = prefs.hotkeyConfig
+            hasCompletedOnboarding = prefs.hasCompletedOnboarding
         }
     }
 
     private func save() {
-        let prefs = Preferences(excludedApps: excludedApps, windowSizePreset: windowSizePreset, maxHistoryCount: maxHistoryCount, hotkeyConfig: hotkeyConfig)
+        let prefs = Preferences(excludedApps: excludedApps, windowSizePreset: windowSizePreset, maxHistoryCount: maxHistoryCount, hotkeyConfig: hotkeyConfig, hasCompletedOnboarding: hasCompletedOnboarding)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(prefs) else { return }

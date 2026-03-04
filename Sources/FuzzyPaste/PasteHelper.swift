@@ -97,7 +97,13 @@ enum PasteHelper {
 
     /// CGEvent を使って Cmd+V キー押下をシミュレート。
     /// これにより、アクティブなアプリにペーストが実行される。
+    /// アクセシビリティ権限がない場合はアラートを表示して中断する。
     private static func simulatePaste() {
+        guard AccessibilityChecker.isTrusted else {
+            showAccessibilityRequiredAlert()
+            return
+        }
+
         let source = CGEventSource(stateID: .hidSystemState)
         let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true)
         let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
@@ -105,5 +111,22 @@ enum PasteHelper {
         keyUp?.flags = .maskCommand
         keyDown?.post(tap: .cghidEventTap)
         keyUp?.post(tap: .cghidEventTap)
+    }
+
+    /// アクセシビリティ権限がない状態でペーストしようとした場合のアラート。
+    private static func showAccessibilityRequiredAlert() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "ペーストにはアクセシビリティ権限が必要です"
+        alert.informativeText = "システム設定で FuzzyPaste にアクセシビリティ権限を付与してください。"
+        alert.addButton(withTitle: "システム設定を開く")
+        alert.addButton(withTitle: "閉じる")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            AccessibilityChecker.openSystemPreferences()
+        }
     }
 }
