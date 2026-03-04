@@ -16,7 +16,16 @@ struct FPaste: AsyncParsableCommand {
 private func formatSnippet(_ item: SnippetItem, score: Int? = nil) -> String {
     let tags = item.tags.isEmpty ? "" : " [\(item.tags.joined(separator: ", "))]"
     let scoreSuffix = score.map { "  (score: \($0))" } ?? ""
-    let preview = item.content.prefix(60).replacingOccurrences(of: "\n", with: "\\n")
+    let preview: String
+    switch item.content {
+    case .text(let text):
+        preview = String(text.prefix(60)).replacingOccurrences(of: "\n", with: "\\n")
+    case .image(let meta):
+        let name = meta.originalFileName ?? meta.fileName
+        preview = "[画像] \(name) \(meta.pixelWidth)×\(meta.pixelHeight)"
+    case .file(let meta):
+        preview = "[ファイル] \(meta.originalFileName)"
+    }
     return "\(item.id)  \(item.title)\(tags)\(scoreSuffix)\n  \(preview)"
 }
 
@@ -70,7 +79,7 @@ extension FPaste {
 
         func run() async throws {
             let store = await SnippetStore()
-            await store.add(title: title, content: content, tags: tag)
+            await store.add(title: title, content: .text(content), tags: tag)
             print("追加しました: \(title)")
         }
     }

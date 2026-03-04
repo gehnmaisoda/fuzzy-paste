@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         historyStore.onFileDelete = { [weak self] fileName in
             self?.fileStore.delete(fileName: fileName)
         }
+        snippetStore.onImageDelete = { [weak self] fileName in
+            self?.imageStore.delete(fileName: fileName)
+        }
+        snippetStore.onFileDelete = { [weak self] fileName in
+            self?.fileStore.delete(fileName: fileName)
+        }
         historyStore.setMaxItems(preferencesStore.maxHistoryCount)
     }
 
@@ -241,7 +247,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 動的スニペット
 
     private func showDynamicSnippetDialog(snippet: SnippetItem, previousApp: NSRunningApplication?) {
-        let names = PlaceholderParser.extractPlaceholderNames(from: snippet.content)
+        guard let text = snippet.text else { return }
+        let names = PlaceholderParser.extractPlaceholderNames(from: text)
         guard !names.isEmpty else { return }
 
         let window = DynamicSnippetWindow(snippet: snippet, placeholderNames: names)
@@ -277,7 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let window = snippetManagerWindow ?? SnippetManagerWindow(store: snippetStore)
+        let window = snippetManagerWindow ?? SnippetManagerWindow(store: snippetStore, imageStore: imageStore, fileStore: fileStore)
         snippetManagerWindow = window
         window.showWindow()
     }

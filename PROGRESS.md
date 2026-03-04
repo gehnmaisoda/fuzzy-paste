@@ -55,6 +55,7 @@
 - [x] スニペット Import/Export（JSON エクスポート・インポート、プレビュー・重複検出付き）
 - [x] 動的スニペット（`{{プレースホルダー}}` 置換、入力ダイアログ、リアルタイムプレビュー）
 - [x] スニペット管理画面モダン化（角丸選択ハイライト・ホバーエフェクト・SF Symbols・ツールバー改善・フロストガラス統一）
+- [x] スニペット マルチタイプ対応（テキスト / 画像 / ファイル — SnippetContent enum、管理画面での追加・プレビュー、検索・ペースト・D&D・Quick Look 対応）
 - [ ] 自動起動 (SMAppService)
 - [x] アクセシビリティ権限チェック・リクエスト（オンボーディング画面統合）
 - [x] FuzzyPasteCore ライブラリ分離（SnippetStore, HistoryStore, FuzzyMatcher, SearchResultItem を共有ライブラリに切り出し）
