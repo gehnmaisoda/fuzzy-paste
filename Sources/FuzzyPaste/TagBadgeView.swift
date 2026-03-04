@@ -4,9 +4,9 @@ import AppKit
 @MainActor
 final class TagBadge: NSView {
     private enum Const {
-        static let hPad: CGFloat = 6
-        static let vPad: CGFloat = 2
-        static let cornerRadius: CGFloat = 4
+        static let hPad: CGFloat = 8
+        static let vPad: CGFloat = 3
+        static let cornerRadius: CGFloat = 6
         static let fontSize: CGFloat = 11
         static let closeSize: CGFloat = 12
         static let closeGap: CGFloat = 2
@@ -20,11 +20,11 @@ final class TagBadge: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Const.cornerRadius
-        layer?.backgroundColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.15).cgColor
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
         translatesAutoresizingMaskIntoConstraints = false
 
         label.font = .systemFont(ofSize: Const.fontSize, weight: .medium)
-        label.textColor = .secondaryLabelColor
+        label.textColor = .controlAccentColor
         label.stringValue = text
         label.translatesAutoresizingMaskIntoConstraints = false
         label.setContentHuggingPriority(.required, for: .horizontal)
@@ -44,7 +44,7 @@ final class TagBadge: NSView {
             btn.target = self
             btn.action = #selector(closeTapped)
             btn.translatesAutoresizingMaskIntoConstraints = false
-            btn.contentTintColor = .tertiaryLabelColor
+            btn.contentTintColor = .controlAccentColor
             addSubview(btn)
             closeButton = btn
 
@@ -77,7 +77,6 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
         static let vGap: CGFloat = 4
         static let inset: CGFloat = 6
         static let inputMinWidth: CGFloat = 80
-        static let fontSize: CGFloat = 11
         static let cornerRadius: CGFloat = 6
         static let borderWidth: CGFloat = 0.5
     }
@@ -86,6 +85,10 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
     private let suggestionLabel = NSTextField(labelWithString: "")
     private var badgeViews: [TagBadge] = []
     var onTagsChanged: (([String]) -> Void)?
+    /// Tab で次のフィールドに移動するコールバック
+    var onTabOut: (() -> Void)?
+    /// Shift+Tab で前のフィールドに移動するコールバック
+    var onBackTabOut: (() -> Void)?
 
     /// 補完候補を提供するための全タグリスト。外部から設定する。
     var allKnownTags: [String] = []
@@ -104,15 +107,20 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
         wantsLayer = true
         layer?.cornerRadius = Const.cornerRadius
         layer?.borderWidth = Const.borderWidth
-        layer?.borderColor = NSColor.separatorColor.cgColor
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
         setupInputField()
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
+    /// 外部からタグ入力フィールドにフォーカスを移す
+    func focusInputField() {
+        window?.makeFirstResponder(inputField)
+    }
+
     private func setupInputField() {
-        inputField.font = .systemFont(ofSize: Const.fontSize)
+        inputField.font = .systemFont(ofSize: 13)
         inputField.placeholderString = "タグを追加..."
         inputField.isBordered = false
         inputField.drawsBackground = false
@@ -121,7 +129,7 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
         inputField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(inputField)
 
-        suggestionLabel.font = .systemFont(ofSize: Const.fontSize)
+        suggestionLabel.font = inputField.font
         suggestionLabel.textColor = .tertiaryLabelColor
         suggestionLabel.isHidden = true
         suggestionLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -234,13 +242,22 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
             commitTag()
             return true
         }
-        // Tab: サジェストがあれば補完確定
+        // Tab: サジェストがあれば補完確定、なければ次のフィールドへ
         if commandSelector == #selector(insertTab(_:)) {
             if let tag = suggestedTag {
                 inputField.stringValue = tag
                 commitTag()
                 return true
             }
+            commitTag()
+            onTabOut?()
+            return true
+        }
+        // Shift+Tab: 前のフィールドへ
+        if commandSelector == #selector(insertBacktab(_:)) {
+            commitTag()
+            onBackTabOut?()
+            return true
         }
         // Delete キーでフィールドが空なら最後のタグを削除
         if commandSelector == #selector(deleteBackward(_:)) {
