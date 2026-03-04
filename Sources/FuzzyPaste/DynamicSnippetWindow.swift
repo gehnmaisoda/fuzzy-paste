@@ -455,7 +455,7 @@ final class DynamicSnippetWindow: NSPanel {
 
     private func updatePreview() {
         let values = currentValues()
-        let resolved = PlaceholderParser.resolve(template: snippet.content, values: values)
+        let resolved = PlaceholderParser.resolve(template: snippet.text ?? "", values: values)
         previewTextView.string = resolved
     }
 
@@ -471,7 +471,7 @@ final class DynamicSnippetWindow: NSPanel {
     }
 
     private func resolvedText() -> String {
-        PlaceholderParser.resolve(template: snippet.content, values: currentValues())
+        PlaceholderParser.resolve(template: snippet.text ?? "", values: currentValues())
     }
 
     @objc private func handlePaste() {

@@ -110,6 +110,178 @@ private final class PlaceholderLabel: NSTextField {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
+/// ドロップゾーンビュー。画像/ファイルのドラッグ&ドロップとファイル選択ボタンを持つ。
+@MainActor
+private final class DropZoneView: NSView {
+    enum Kind { case image, file }
+
+    var onFileSelected: ((URL) -> Void)?
+
+    private let kind: Kind
+    private let dashBorder = CAShapeLayer()
+    private let iconView = NSImageView()
+    private let messageLabel = NSTextField(labelWithString: "")
+    private let browseButton = NSButton()
+    private var isDragOver = false {
+        didSet { updateAppearance() }
+    }
+
+    init(kind: Kind) {
+        self.kind = kind
+        super.init(frame: .zero)
+        setupUI()
+        registerDragTypes()
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    private func setupUI() {
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+
+        // 破線ボーダー
+        dashBorder.fillColor = nil
+        dashBorder.strokeColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
+        dashBorder.lineWidth = 1.5
+        dashBorder.lineDashPattern = [6, 4]
+        layer?.addSublayer(dashBorder)
+
+        // アイコン
+        let symbolName = kind == .image ? "photo.badge.plus" : "doc.badge.plus"
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        iconView.contentTintColor = .tertiaryLabelColor
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .light)
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(iconView)
+
+        // メッセージ
+        let msg = kind == .image ? "ここに画像をドラッグ&ドロップ" : "ここにファイルをドラッグ&ドロップ"
+        messageLabel.stringValue = msg
+        messageLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        messageLabel.textColor = .tertiaryLabelColor
+        messageLabel.alignment = .center
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(messageLabel)
+
+        // 選択ボタン
+        let buttonTitle = kind == .image ? "画像を選択…" : "ファイルを選択…"
+        browseButton.title = buttonTitle
+        browseButton.bezelStyle = .rounded
+        browseButton.target = self
+        browseButton.action = #selector(browseClicked)
+        browseButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(browseButton)
+
+        NSLayoutConstraint.activate([
+            iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -28),
+
+            messageLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 8),
+            messageLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+
+            browseButton.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 10),
+            browseButton.centerXAnchor.constraint(equalTo: centerXAnchor),
+        ])
+    }
+
+    private func registerDragTypes() {
+        registerForDraggedTypes([.fileURL])
+    }
+
+    override func layout() {
+        super.layout()
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 8, yRadius: 8)
+        dashBorder.path = path.cgPath
+        dashBorder.frame = bounds
+    }
+
+    private func updateAppearance() {
+        if isDragOver {
+            dashBorder.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.7).cgColor
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.06).cgColor
+        } else {
+            dashBorder.strokeColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
+            layer?.backgroundColor = nil
+        }
+    }
+
+    // MARK: - NSDraggingDestination
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard hasValidFile(sender) else { return [] }
+        isDragOver = true
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard hasValidFile(sender) else { return [] }
+        return .copy
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        isDragOver = false
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        isDragOver = false
+        guard let url = fileURL(from: sender) else { return false }
+        onFileSelected?(url)
+        return true
+    }
+
+    private func hasValidFile(_ info: NSDraggingInfo) -> Bool {
+        guard let url = fileURL(from: info) else { return false }
+        if kind == .image {
+            return UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
+        }
+        return true
+    }
+
+    private func fileURL(from info: NSDraggingInfo) -> URL? {
+        info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true
+        ])?.first as? URL
+    }
+
+    // MARK: - ファイル選択
+
+    @objc private func browseClicked() {
+        let openPanel = NSOpenPanel()
+        openPanel.canChooseFiles = true
+        openPanel.canChooseDirectories = false
+        openPanel.allowsMultipleSelection = false
+        if kind == .image {
+            openPanel.allowedContentTypes = [.image]
+            openPanel.message = "スニペットに設定する画像を選択してください"
+        } else {
+            openPanel.message = "スニペットに設定するファイルを選択してください"
+        }
+        guard openPanel.runModal() == .OK, let url = openPanel.url else { return }
+        onFileSelected?(url)
+    }
+}
+
+/// NSBezierPath → CGPath 変換
+private extension NSBezierPath {
+    var cgPath: CGPath {
+        let path = CGMutablePath()
+        var points = [CGPoint](repeating: .zero, count: 3)
+        for i in 0..<elementCount {
+            let type = element(at: i, associatedPoints: &points)
+            switch type {
+            case .moveTo: path.move(to: points[0])
+            case .lineTo: path.addLine(to: points[0])
+            case .curveTo: path.addCurve(to: points[2], control1: points[0], control2: points[1])
+            case .closePath: path.closeSubpath()
+            case .cubicCurveTo: path.addCurve(to: points[2], control1: points[0], control2: points[1])
+            case .quadraticCurveTo: path.addQuadCurve(to: points[1], control: points[0])
+            @unknown default: break
+            }
+        }
+        return path
+    }
+}
+
 /// スニペット管理ウィンドウ。
 /// メニューバーの「スニペット管理...」から開く。
 ///
@@ -183,16 +355,36 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private let removeButton = NSButton(frame: .zero)
     private let actionButton = NSButton(frame: .zero)
 
+    // タイプセグメントコントロール
+    private let typeSegment = NSSegmentedControl()
+
+    // 画像/ファイルコンテンツ用コンテナ
+    private let textContentContainer = NSView()
+    private let imageContentContainer = NSView()
+    private let fileContentContainer = NSView()
+    private let imagePreviewView = NSImageView()
+    private let imageInfoLabel = NSTextField(labelWithString: "")
+    private let fileIconView = NSImageView()
+    private let fileInfoLabel = NSTextField(labelWithString: "")
+
+    // ドロップゾーン（画像/ファイル選択用）
+    private let imageDropZone = DropZoneView(kind: .image)
+    private let fileDropZone = DropZoneView(kind: .file)
+
     // MARK: - 状態
 
     private let store: SnippetStore
+    private let imageStore: ImageStore
+    private let fileStore: FileStore
     /// フィールド更新中のフラグ。変更通知の再帰を防ぐ。
     private var isUpdatingFields = false
 
     // MARK: - 初期化
 
-    init(store: SnippetStore) {
+    init(store: SnippetStore, imageStore: ImageStore, fileStore: FileStore) {
         self.store = store
+        self.imageStore = imageStore
+        self.fileStore = fileStore
         super.init(
             contentRect: NSRect(origin: .zero, size: Layout.windowSize),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
@@ -450,17 +642,43 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             guard let self else { return }
             self.makeFirstResponder(self.titleField)
         }
+        tagContainer.setContentHuggingPriority(.required, for: .vertical)
+        tagContainer.setContentCompressionResistancePriority(.required, for: .vertical)
         panel.addSubview(tagContainer)
 
-        // ── 内容 ──
+        // ── タイプ ──
+        let typeLabel = makeLabel("タイプ")
+        panel.addSubview(typeLabel)
+
+        typeSegment.segmentCount = 3
+        typeSegment.setLabel("テキスト", forSegment: 0)
+        typeSegment.setLabel("画像", forSegment: 1)
+        typeSegment.setLabel("ファイル", forSegment: 2)
+        typeSegment.setImage(NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil), forSegment: 0)
+        typeSegment.setImage(NSImage(systemSymbolName: "photo", accessibilityDescription: nil), forSegment: 1)
+        typeSegment.setImage(NSImage(systemSymbolName: "doc", accessibilityDescription: nil), forSegment: 2)
+        typeSegment.segmentStyle = .rounded
+        typeSegment.segmentDistribution = .fillEqually
+        typeSegment.controlSize = .large
+        typeSegment.target = self
+        typeSegment.action = #selector(typeSegmentChanged)
+        typeSegment.isEnabled = false
+        typeSegment.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(typeSegment)
+
+        // ── 内容ラベル ──
         let contentLabel = makeLabel("内容")
         panel.addSubview(contentLabel)
 
+        // ── テキストコンテンツコンテナ ──
+        textContentContainer.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(textContentContainer)
+
         let contentWrapper = makeStyledWrapper()
         contentWrapper.layer?.masksToBounds = true
-        panel.addSubview(contentWrapper)
+        textContentContainer.addSubview(contentWrapper)
 
-        // プレースホルダー（スクロールビューの下に配置し透過背景で見えるようにする）
+        // プレースホルダー
         contentPlaceholder.font = .systemFont(ofSize: Layout.fieldFontSize)
         contentPlaceholder.textColor = .placeholderTextColor
         contentPlaceholder.isHidden = true
@@ -493,6 +711,55 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         contentScrollView.translatesAutoresizingMaskIntoConstraints = false
         contentWrapper.addSubview(contentScrollView)
 
+        // ── 画像コンテンツコンテナ ──
+        imageContentContainer.translatesAutoresizingMaskIntoConstraints = false
+        imageContentContainer.isHidden = true
+        panel.addSubview(imageContentContainer)
+
+        let imageWrapper = makeStyledWrapper()
+        imageContentContainer.addSubview(imageWrapper)
+
+        imagePreviewView.imageScaling = .scaleProportionallyDown
+        imagePreviewView.translatesAutoresizingMaskIntoConstraints = false
+        imageWrapper.addSubview(imagePreviewView)
+
+        imageInfoLabel.font = .systemFont(ofSize: Layout.cellPreviewFontSize)
+        imageInfoLabel.textColor = .secondaryLabelColor
+        imageInfoLabel.lineBreakMode = .byTruncatingTail
+        imageInfoLabel.translatesAutoresizingMaskIntoConstraints = false
+        imageWrapper.addSubview(imageInfoLabel)
+
+        // ドロップゾーン（画像）
+        imageDropZone.onFileSelected = { [weak self] url in
+            self?.handleDroppedFile(url, forType: .image)
+        }
+        imageContentContainer.addSubview(imageDropZone)
+
+        // ── ファイルコンテンツコンテナ ──
+        fileContentContainer.translatesAutoresizingMaskIntoConstraints = false
+        fileContentContainer.isHidden = true
+        panel.addSubview(fileContentContainer)
+
+        let fileWrapper = makeStyledWrapper()
+        fileContentContainer.addSubview(fileWrapper)
+
+        fileIconView.imageScaling = .scaleProportionallyUpOrDown
+        fileIconView.translatesAutoresizingMaskIntoConstraints = false
+        fileWrapper.addSubview(fileIconView)
+
+        fileInfoLabel.font = .systemFont(ofSize: Layout.cellPreviewFontSize)
+        fileInfoLabel.textColor = .secondaryLabelColor
+        fileInfoLabel.lineBreakMode = .byTruncatingTail
+        fileInfoLabel.maximumNumberOfLines = 3
+        fileInfoLabel.translatesAutoresizingMaskIntoConstraints = false
+        fileWrapper.addSubview(fileInfoLabel)
+
+        // ドロップゾーン（ファイル）
+        fileDropZone.onFileSelected = { [weak self] url in
+            self?.handleDroppedFile(url, forType: .file)
+        }
+        fileContentContainer.addSubview(fileDropZone)
+
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: panel.topAnchor),
             titleLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
@@ -513,15 +780,27 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             tagContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
             tagContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
 
-            contentLabel.topAnchor.constraint(equalTo: tagContainer.bottomAnchor, constant: Layout.sectionSpacing),
+            typeLabel.topAnchor.constraint(equalTo: tagContainer.bottomAnchor, constant: Layout.sectionSpacing),
+            typeLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+
+            typeSegment.topAnchor.constraint(equalTo: typeLabel.bottomAnchor, constant: Layout.spacing),
+            typeSegment.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            typeSegment.widthAnchor.constraint(equalToConstant: 240),
+
+            contentLabel.topAnchor.constraint(equalTo: typeSegment.bottomAnchor, constant: Layout.sectionSpacing),
             contentLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
 
-            contentWrapper.topAnchor.constraint(equalTo: contentLabel.bottomAnchor, constant: Layout.spacing),
-            contentWrapper.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-            contentWrapper.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
-            contentWrapper.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+            // テキストコンテンツコンテナ
+            textContentContainer.topAnchor.constraint(equalTo: contentLabel.bottomAnchor, constant: Layout.spacing),
+            textContentContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            textContentContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            textContentContainer.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
 
-            // プレースホルダー位置: テキストビューの textContainerInset + lineFragmentPadding に合わせる
+            contentWrapper.topAnchor.constraint(equalTo: textContentContainer.topAnchor),
+            contentWrapper.leadingAnchor.constraint(equalTo: textContentContainer.leadingAnchor),
+            contentWrapper.trailingAnchor.constraint(equalTo: textContentContainer.trailingAnchor),
+            contentWrapper.bottomAnchor.constraint(equalTo: textContentContainer.bottomAnchor),
+
             contentPlaceholder.topAnchor.constraint(equalTo: contentWrapper.topAnchor, constant: 8),
             contentPlaceholder.leadingAnchor.constraint(equalTo: contentWrapper.leadingAnchor, constant: 8),
 
@@ -529,6 +808,58 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             contentScrollView.leadingAnchor.constraint(equalTo: contentWrapper.leadingAnchor),
             contentScrollView.trailingAnchor.constraint(equalTo: contentWrapper.trailingAnchor),
             contentScrollView.bottomAnchor.constraint(equalTo: contentWrapper.bottomAnchor),
+
+            // 画像コンテンツコンテナ
+            imageContentContainer.topAnchor.constraint(equalTo: contentLabel.bottomAnchor, constant: Layout.spacing),
+            imageContentContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            imageContentContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            imageContentContainer.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+
+            imageWrapper.topAnchor.constraint(equalTo: imageContentContainer.topAnchor),
+            imageWrapper.leadingAnchor.constraint(equalTo: imageContentContainer.leadingAnchor),
+            imageWrapper.trailingAnchor.constraint(equalTo: imageContentContainer.trailingAnchor),
+            imageWrapper.bottomAnchor.constraint(equalTo: imageContentContainer.bottomAnchor),
+
+            imagePreviewView.topAnchor.constraint(equalTo: imageWrapper.topAnchor, constant: Layout.inputPadding),
+            imagePreviewView.leadingAnchor.constraint(equalTo: imageWrapper.leadingAnchor, constant: Layout.inputPadding),
+            imagePreviewView.trailingAnchor.constraint(equalTo: imageWrapper.trailingAnchor, constant: -Layout.inputPadding),
+            imagePreviewView.bottomAnchor.constraint(equalTo: imageInfoLabel.topAnchor, constant: -Layout.spacing),
+
+            imageInfoLabel.leadingAnchor.constraint(equalTo: imageWrapper.leadingAnchor, constant: Layout.inputPadding),
+            imageInfoLabel.trailingAnchor.constraint(equalTo: imageWrapper.trailingAnchor, constant: -Layout.inputPadding),
+            imageInfoLabel.bottomAnchor.constraint(equalTo: imageWrapper.bottomAnchor, constant: -Layout.inputPadding),
+
+            // 画像ドロップゾーン
+            imageDropZone.topAnchor.constraint(equalTo: imageContentContainer.topAnchor),
+            imageDropZone.leadingAnchor.constraint(equalTo: imageContentContainer.leadingAnchor),
+            imageDropZone.trailingAnchor.constraint(equalTo: imageContentContainer.trailingAnchor),
+            imageDropZone.bottomAnchor.constraint(equalTo: imageContentContainer.bottomAnchor),
+
+            // ファイルコンテンツコンテナ
+            fileContentContainer.topAnchor.constraint(equalTo: contentLabel.bottomAnchor, constant: Layout.spacing),
+            fileContentContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            fileContentContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            fileContentContainer.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+
+            fileWrapper.topAnchor.constraint(equalTo: fileContentContainer.topAnchor),
+            fileWrapper.leadingAnchor.constraint(equalTo: fileContentContainer.leadingAnchor),
+            fileWrapper.trailingAnchor.constraint(equalTo: fileContentContainer.trailingAnchor),
+            fileWrapper.bottomAnchor.constraint(equalTo: fileContentContainer.bottomAnchor),
+
+            fileIconView.topAnchor.constraint(equalTo: fileWrapper.topAnchor, constant: Layout.padding),
+            fileIconView.centerXAnchor.constraint(equalTo: fileWrapper.centerXAnchor),
+            fileIconView.widthAnchor.constraint(equalToConstant: 64),
+            fileIconView.heightAnchor.constraint(equalToConstant: 64),
+
+            fileInfoLabel.topAnchor.constraint(equalTo: fileIconView.bottomAnchor, constant: Layout.spacing * 2),
+            fileInfoLabel.leadingAnchor.constraint(equalTo: fileWrapper.leadingAnchor, constant: Layout.inputPadding),
+            fileInfoLabel.trailingAnchor.constraint(equalTo: fileWrapper.trailingAnchor, constant: -Layout.inputPadding),
+
+            // ファイルドロップゾーン
+            fileDropZone.topAnchor.constraint(equalTo: fileContentContainer.topAnchor),
+            fileDropZone.leadingAnchor.constraint(equalTo: fileContentContainer.leadingAnchor),
+            fileDropZone.trailingAnchor.constraint(equalTo: fileContentContainer.trailingAnchor),
+            fileDropZone.bottomAnchor.constraint(equalTo: fileContentContainer.bottomAnchor),
         ])
     }
 
@@ -566,6 +897,13 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
+    }
+
+    /// ファイルサイズを読みやすい文字列に変換する
+    private func formatFileSize(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
     }
 
     // MARK: - 表示
@@ -637,7 +975,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         }
 
         guard let titleTF = cell.viewWithTag(CellTag.title) as? NSTextField,
-              let previewTF = cell.viewWithTag(CellTag.preview) as? NSTextField else {
+              let previewTF = cell.viewWithTag(CellTag.preview) as? NSTextField,
+              let iconView = cell.viewWithTag(CellTag.icon) as? NSImageView else {
             return cell
         }
 
@@ -649,14 +988,37 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         titleTF.font = .systemFont(ofSize: Layout.cellTitleFontSize, weight: .medium)
         titleTF.textColor = item.title.isEmpty ? .tertiaryLabelColor : .labelColor
 
+        // ── アイコン: コンテンツ型で切替 ──
+        switch item.content {
+        case .text:
+            iconView.image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: nil)
+            iconView.contentTintColor = NSColor.systemOrange.withAlphaComponent(0.7)
+        case .image:
+            iconView.image = NSImage(systemSymbolName: "photo.fill", accessibilityDescription: nil)
+            iconView.contentTintColor = NSColor.systemBlue.withAlphaComponent(0.7)
+        case .file:
+            iconView.image = NSImage(systemSymbolName: "doc.fill", accessibilityDescription: nil)
+            iconView.contentTintColor = NSColor.systemGray
+        }
+
         // ── 2行目: 内容プレビュー ──
-        if item.content.isEmpty {
-            previewTF.stringValue = "（内容なし）"
-            previewTF.textColor = .tertiaryLabelColor
-        } else {
-            previewTF.stringValue = item.content
-                .components(separatedBy: .newlines)
-                .joined(separator: " ")
+        switch item.content {
+        case .text(let text):
+            if text.isEmpty {
+                previewTF.stringValue = "（内容なし）"
+                previewTF.textColor = .tertiaryLabelColor
+            } else {
+                previewTF.stringValue = text
+                    .components(separatedBy: .newlines)
+                    .joined(separator: " ")
+                previewTF.textColor = .secondaryLabelColor
+            }
+        case .image(let meta):
+            let name = meta.originalFileName ?? meta.fileName
+            previewTF.stringValue = "\(name)  \(meta.pixelWidth)x\(meta.pixelHeight)"
+            previewTF.textColor = .secondaryLabelColor
+        case .file(let meta):
+            previewTF.stringValue = meta.originalFileName
             previewTF.textColor = .secondaryLabelColor
         }
 
@@ -731,12 +1093,54 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             let item = store.items[row]
             titleField.stringValue = item.title
             tagContainer.tags = item.tags
-            contentTextView.string = item.content
             titleField.isEnabled = true
-            contentTextView.isEditable = true
-            contentTextView.isSelectable = true
             removeButton.isEnabled = true
-            contentPlaceholder.isHidden = !item.content.isEmpty
+            typeSegment.isEnabled = true
+            switch item.content {
+            case .text: typeSegment.selectedSegment = 0
+            case .image: typeSegment.selectedSegment = 1
+            case .file: typeSegment.selectedSegment = 2
+            }
+
+            switch item.content {
+            case .text(let text):
+                textContentContainer.isHidden = false
+                imageContentContainer.isHidden = true
+                fileContentContainer.isHidden = true
+                contentTextView.string = text
+                contentTextView.isEditable = true
+                contentTextView.isSelectable = true
+                contentPlaceholder.isHidden = !text.isEmpty
+            case .image(let meta):
+                textContentContainer.isHidden = true
+                imageContentContainer.isHidden = false
+                fileContentContainer.isHidden = true
+                contentTextView.isEditable = false
+                contentTextView.isSelectable = false
+                // 画像プレビュー表示、ドロップゾーン非表示
+                imageDropZone.isHidden = true
+                imagePreviewView.isHidden = false
+                imageInfoLabel.isHidden = false
+                if let image = NSImage(contentsOf: imageStore.imageURL(for: meta.fileName)) {
+                    imagePreviewView.image = image
+                } else {
+                    imagePreviewView.image = imageStore.thumbnail(for: meta.fileName)
+                }
+                let name = meta.originalFileName ?? meta.fileName
+                imageInfoLabel.stringValue = "\(name)  \(meta.pixelWidth)x\(meta.pixelHeight)  \(formatFileSize(meta.fileSizeBytes))"
+            case .file(let meta):
+                textContentContainer.isHidden = true
+                imageContentContainer.isHidden = true
+                fileContentContainer.isHidden = false
+                contentTextView.isEditable = false
+                contentTextView.isSelectable = false
+                // ファイル情報表示、ドロップゾーン非表示
+                fileDropZone.isHidden = true
+                fileIconView.isHidden = false
+                fileInfoLabel.isHidden = false
+                fileIconView.image = fileStore.icon(for: meta)
+                fileInfoLabel.stringValue = "\(meta.originalFileName)\n\(meta.fileExtension.uppercased())  \(formatFileSize(meta.fileSizeBytes))"
+            }
         } else {
             titleField.stringValue = ""
             tagContainer.tags = []
@@ -745,7 +1149,12 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             contentTextView.isEditable = false
             contentTextView.isSelectable = false
             removeButton.isEnabled = false
+            typeSegment.isEnabled = false
+            typeSegment.selectedSegment = 0
             contentPlaceholder.isHidden = true
+            textContentContainer.isHidden = false
+            imageContentContainer.isHidden = true
+            fileContentContainer.isHidden = true
         }
         isUpdatingFields = false
     }
@@ -753,10 +1162,18 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private func saveCurrentEdits() {
         let row = tableView.selectedRow
         guard row >= 0, row < store.items.count else { return }
+        let item = store.items[row]
+        let content: SnippetContent
+        switch item.content {
+        case .text:
+            content = .text(contentTextView.string)
+        case .image, .file:
+            content = item.content
+        }
         store.update(
-            id: store.items[row].id,
+            id: item.id,
             title: titleField.stringValue,
-            content: contentTextView.string,
+            content: content,
             tags: tagContainer.tags
         )
         tagContainer.allKnownTags = store.allTags
@@ -813,13 +1230,108 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: - アクション
 
     @objc private func addClicked() {
-        store.add(title: "新しいスニペット", content: "")
+        store.add(title: "新しいスニペット", content: .text(""))
         tableView.reloadData()
         tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         updateEditFields()
         updateEmptyState()
         makeFirstResponder(titleField)
         titleField.selectText(nil)
+    }
+
+    @objc private func typeSegmentChanged() {
+        let row = tableView.selectedRow
+        guard row >= 0, row < store.items.count else { return }
+
+        switch typeSegment.selectedSegment {
+        case 0: changeToText()
+        case 1: changeToImage()
+        case 2: changeToFile()
+        default: break
+        }
+    }
+
+    private func changeToText() {
+        let row = tableView.selectedRow
+        guard row >= 0, row < store.items.count else { return }
+        let item = store.items[row]
+        // ストアが既にテキストでもUI（ドロップゾーン）が出ている場合があるので、常にリセット
+        if case .text = item.content {
+            textContentContainer.isHidden = false
+            imageContentContainer.isHidden = true
+            fileContentContainer.isHidden = true
+            updateEditFields()
+            return
+        }
+        store.update(id: item.id, title: item.title, content: .text(""), tags: item.tags)
+        tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+        updateEditFields()
+    }
+
+    private func changeToImage() {
+        let row = tableView.selectedRow
+        guard row >= 0, row < store.items.count else {
+            revertTypeSegment()
+            return
+        }
+
+        // ドロップゾーンを表示（ファイル選択はドロップゾーン内で行う）
+        textContentContainer.isHidden = true
+        imageContentContainer.isHidden = false
+        fileContentContainer.isHidden = true
+        imageDropZone.isHidden = false
+        imagePreviewView.isHidden = true
+        imageInfoLabel.isHidden = true
+    }
+
+    private func changeToFile() {
+        let row = tableView.selectedRow
+        guard row >= 0, row < store.items.count else {
+            revertTypeSegment()
+            return
+        }
+
+        // ドロップゾーンを表示（ファイル選択はドロップゾーン内で行う）
+        textContentContainer.isHidden = true
+        imageContentContainer.isHidden = true
+        fileContentContainer.isHidden = false
+        fileDropZone.isHidden = false
+        fileIconView.isHidden = true
+        fileInfoLabel.isHidden = true
+    }
+
+    /// ファイル選択キャンセル時にセグメントを現在のコンテンツ型に戻す
+    private func revertTypeSegment() {
+        let row = tableView.selectedRow
+        guard row >= 0, row < store.items.count else { return }
+        switch store.items[row].content {
+        case .text: typeSegment.selectedSegment = 0
+        case .image: typeSegment.selectedSegment = 1
+        case .file: typeSegment.selectedSegment = 2
+        }
+    }
+
+    /// ドロップゾーンからファイルが選択された時のハンドラ
+    private func handleDroppedFile(_ url: URL, forType type: DropZoneView.Kind) {
+        let row = tableView.selectedRow
+        guard row >= 0, row < store.items.count else { return }
+
+        guard let data = try? Data(contentsOf: url) else { return }
+        let originalFileName = url.lastPathComponent
+        let item = store.items[row]
+
+        switch type {
+        case .image:
+            let utType = UTType(filenameExtension: url.pathExtension)?.identifier ?? "public.image"
+            guard let metadata = imageStore.save(data: data, utType: utType, originalFileName: originalFileName) else { return }
+            store.update(id: item.id, title: item.title, content: .image(metadata), tags: item.tags)
+        case .file:
+            guard let metadata = fileStore.save(data: data, originalFileName: originalFileName) else { return }
+            store.update(id: item.id, title: item.title, content: .file(metadata), tags: item.tags)
+        }
+
+        tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+        updateEditFields()
     }
 
     @objc private func actionClicked() {

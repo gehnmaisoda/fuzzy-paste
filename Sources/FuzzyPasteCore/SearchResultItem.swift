@@ -9,7 +9,7 @@ public enum SearchResultItem: Sendable {
     public var text: String? {
         switch self {
         case .clip(let item): return item.text
-        case .snippet(let item): return item.content
+        case .snippet(let item): return item.text
         }
     }
 

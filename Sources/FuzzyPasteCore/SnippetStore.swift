@@ -1,19 +1,44 @@
 import Foundation
 
+/// スニペットのコンテンツ種別。テキスト・画像・ファイルの3タイプ。
+public enum SnippetContent: Codable, Sendable, Equatable {
+    case text(String)
+    case image(ImageMetadata)
+    case file(FileMetadata)
+}
+
 /// スニペットアイテム。title と content で登録し、両方で検索可能。
 public struct SnippetItem: Codable, Identifiable, Sendable {
     public let id: UUID
     public let title: String
-    public let content: String
+    public let content: SnippetContent
     public let tags: [String]
     public let createdAt: Date
 
-    public init(id: UUID = UUID(), title: String, content: String, tags: [String] = [], createdAt: Date = Date()) {
+    public init(id: UUID = UUID(), title: String, content: SnippetContent, tags: [String] = [], createdAt: Date = Date()) {
         self.id = id
         self.title = title
         self.content = content
         self.tags = tags
         self.createdAt = createdAt
+    }
+
+    /// テキストコンテンツを返す。画像・ファイルの場合は nil。
+    public var text: String? {
+        if case .text(let s) = content { return s }
+        return nil
+    }
+
+    /// 画像メタデータを返す。テキスト・ファイルの場合は nil。
+    public var imageMetadata: ImageMetadata? {
+        if case .image(let m) = content { return m }
+        return nil
+    }
+
+    /// ファイルメタデータを返す。テキスト・画像の場合は nil。
+    public var fileMetadata: FileMetadata? {
+        if case .file(let m) = content { return m }
+        return nil
     }
 }
 
@@ -45,12 +70,17 @@ public final class SnippetStore {
         load()
     }
 
-    public func add(title: String, content: String, tags: [String] = []) {
+    /// 画像ファイル削除用コールバック。AppDelegate が設定する。
+    public var onImageDelete: ((String) -> Void)?
+    /// ファイル削除用コールバック。AppDelegate が設定する。
+    public var onFileDelete: ((String) -> Void)?
+
+    public func add(title: String, content: SnippetContent, tags: [String] = []) {
         items.insert(SnippetItem(title: title, content: content, tags: tags), at: 0)
         save()
     }
 
-    public func update(id: UUID, title: String, content: String, tags: [String] = []) {
+    public func update(id: UUID, title: String, content: SnippetContent, tags: [String] = []) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         let old = items[index]
         items[index] = SnippetItem(id: old.id, title: title, content: content, tags: tags, createdAt: old.createdAt)
@@ -63,7 +93,17 @@ public final class SnippetStore {
     }
 
     public func remove(id: UUID) {
-        items.removeAll { $0.id == id }
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let item = items[index]
+        switch item.content {
+        case .image(let meta):
+            onImageDelete?(meta.fileName)
+        case .file(let meta):
+            onFileDelete?(meta.fileName)
+        case .text:
+            break
+        }
+        items.remove(at: index)
         save()
     }
 
@@ -98,11 +138,11 @@ public final class SnippetStore {
             imported = try decoder.decode([SnippetItem].self, from: data)
         }
 
-        let existingKeys = Set(items.map { "\($0.title)\n\($0.content)" })
+        let existingKeys = Set(items.map { duplicateKey(for: $0) })
         var newItems: [SnippetItem] = []
         var duplicates: [SnippetItem] = []
         for item in imported {
-            let key = "\(item.title)\n\(item.content)"
+            let key = duplicateKey(for: item)
             if existingKeys.contains(key) {
                 duplicates.append(item)
             } else {
@@ -119,12 +159,25 @@ public final class SnippetStore {
     }
 
     /// スニペットを追加する（新しい UUID を割り当て）。
+    /// 注意: インポートはテキストスニペットのみ対応。
     public func importItems(_ newItems: [SnippetItem]) {
         let reassigned = newItems.map {
             SnippetItem(title: $0.title, content: $0.content, tags: $0.tags, createdAt: $0.createdAt)
         }
         items.insert(contentsOf: reassigned, at: 0)
         save()
+    }
+
+    /// 重複判定用キーを生成する。
+    private func duplicateKey(for item: SnippetItem) -> String {
+        switch item.content {
+        case .text(let text):
+            return "text:\(item.title)\n\(text)"
+        case .image(let meta):
+            return "image:\(item.title)\n\(meta.fileName)"
+        case .file(let meta):
+            return "file:\(item.title)\n\(meta.fileName)"
+        }
     }
 
     private func load() {

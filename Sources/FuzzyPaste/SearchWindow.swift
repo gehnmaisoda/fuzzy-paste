@@ -932,8 +932,11 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             case .image, .file: return layout.imageRowHeight
             case .text: return layout.rowHeight
             }
-        case .snippet:
-            return layout.snippetRowHeight
+        case .snippet(let snippet):
+            switch snippet.content {
+            case .text: return layout.snippetRowHeight
+            case .image, .file: return layout.imageRowHeight
+            }
         }
     }
 
@@ -1257,7 +1260,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         attrStr.append(NSAttributedString(string: snippet.title, attributes: [
             .font: NSFont.systemFont(ofSize: layout.cellFontSize, weight: .medium),
         ]))
-        if PlaceholderParser.hasDynamicPlaceholders(in: snippet.content) {
+        if let text = snippet.text, PlaceholderParser.hasDynamicPlaceholders(in: text) {
             attrStr.append(NSAttributedString(string: " "))
             attrStr.append(accentBadgeAttachment(text: "{ }"))
         }
@@ -1271,9 +1274,16 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         timeLabel.stringValue = relativeTimeString(from: snippet.createdAt)
 
         // 下段: 内容プレビュー
-        let preview = snippet.content
-            .components(separatedBy: .newlines)
-            .joined(separator: " ")
+        let preview: String
+        switch snippet.content {
+        case .text(let text):
+            preview = text.components(separatedBy: .newlines).joined(separator: " ")
+        case .image(let meta):
+            let name = meta.originalFileName ?? meta.fileName
+            preview = "🖼 \(name)  \(meta.pixelWidth)×\(meta.pixelHeight)"
+        case .file(let meta):
+            preview = "📄 \(meta.originalFileName)"
+        }
         bottomLabel.stringValue = preview
 
         return cellView
@@ -1336,16 +1346,27 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     /// テーブルで選択中のアイテムを ClipItem として返す。
-    /// スニペットの場合はテキストの ClipItem を生成して返す。
+    /// スニペットの場合はコンテンツ型に応じた ClipItem を生成して返す。
     private func selectedClipItem() -> ClipItem? {
         let row = tableView.selectedRow
         guard row >= 0, row < filteredItems.count else { return nil }
-        let item = filteredItems[row]
+        return clipItem(from: filteredItems[row])
+    }
+
+    /// SearchResultItem から ClipItem に変換する。
+    private func clipItem(from item: SearchResultItem) -> ClipItem {
         switch item {
         case .clip(let clipItem):
             return clipItem
         case .snippet(let snippet):
-            return ClipItem(text: snippet.content)
+            switch snippet.content {
+            case .text(let text):
+                return ClipItem(text: text)
+            case .image(let meta):
+                return ClipItem(imageMetadata: meta)
+            case .file(let meta):
+                return ClipItem(fileMetadata: meta)
+            }
         }
     }
 
@@ -1359,20 +1380,18 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             // マルチセレクト: 選択順に ClipItem を収集
             let items: [ClipItem] = orderedSelection.compactMap { idx in
                 guard idx >= 0, idx < filteredItems.count else { return nil }
-                switch filteredItems[idx] {
-                case .clip(let clipItem): return clipItem
-                case .snippet(let snippet): return ClipItem(text: snippet.content)
-                }
+                return clipItem(from: filteredItems[idx])
             }
             guard !items.isEmpty else { return }
             dismiss()
             onMultiPaste?(items, app)
         } else {
-            // 動的スニペット判定: プレースホルダー付きスニペットは専用ダイアログへ
+            // 動的スニペット判定: テキストスニペットでプレースホルダー付きなら専用ダイアログへ
             let row = tableView.selectedRow
             if row >= 0, row < filteredItems.count,
                case .snippet(let snippet) = filteredItems[row],
-               PlaceholderParser.hasDynamicPlaceholders(in: snippet.content) {
+               let text = snippet.text,
+               PlaceholderParser.hasDynamicPlaceholders(in: text) {
                 dismiss()
                 onDynamicSnippetPaste?(snippet, app)
                 return
@@ -1458,7 +1477,21 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 }
             }
         case .snippet(let snippet):
-            panel.showText(snippet.content)
+            switch snippet.content {
+            case .text(let text):
+                panel.showText(text)
+            case .image(let meta):
+                if let store = imageStore,
+                   let image = NSImage(contentsOf: store.imageURL(for: meta.fileName)) {
+                    panel.showImage(image)
+                } else if let thumb = imageStore?.thumbnail(for: meta.fileName) {
+                    panel.showImage(thumb)
+                }
+            case .file(let meta):
+                if let store = fileStore {
+                    panel.showImage(store.icon(for: meta))
+                }
+            }
         }
     }
 
@@ -1572,7 +1605,16 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 return dragFileURL(for: meta) as NSURL
             }
         case .snippet(let snippet):
-            return snippet.content as NSString
+            switch snippet.content {
+            case .text(let text):
+                return text as NSString
+            case .image(let meta):
+                guard imageStore != nil else { return nil }
+                return dragURL(for: meta) as NSURL
+            case .file(let meta):
+                guard fileStore != nil else { return nil }
+                return dragFileURL(for: meta) as NSURL
+            }
         }
     }
 

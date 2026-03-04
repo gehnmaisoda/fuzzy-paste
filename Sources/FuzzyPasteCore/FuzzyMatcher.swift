@@ -118,10 +118,17 @@ public enum FuzzyMatcher {
     public static func bestSnippetScore(query: String, snippet: SnippetItem) -> Int? {
         let titleScore: Int? = match(query: query, target: snippet.title)
             .map { $0 + query.count * snippetTitleBonus }
-        var scores: [Int?] = [
-            titleScore,
-            match(query: query, target: snippet.content),
-        ]
+        var scores: [Int?] = [titleScore]
+        switch snippet.content {
+        case .text(let text):
+            scores.append(match(query: query, target: text))
+        case .image(let meta):
+            if let name = meta.originalFileName {
+                scores.append(match(query: query, target: name))
+            }
+        case .file(let meta):
+            scores.append(match(query: query, target: meta.originalFileName))
+        }
         for tag in snippet.tags {
             scores.append(match(query: query, target: tag))
         }
