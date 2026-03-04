@@ -1,6 +1,43 @@
 import AppKit
 
-/// フォーカスを受け取らない NSTableView。
+// MARK: - カスタム行ビュー（角丸セレクション + ホバーエフェクト）
+
+@MainActor
+private final class ModernRowView: NSTableRowView {
+    private static let selectionRadius: CGFloat = 6
+    private static let selectionInsetH: CGFloat = 6
+    private static let hoverAlpha: CGFloat = 0.07
+    private static let selectionAlpha: CGFloat = 0.15
+
+    var isHovered = false {
+        didSet { if oldValue != isHovered { needsDisplay = true } }
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard isSelected else { return }
+        let insetRect = bounds.insetBy(dx: Self.selectionInsetH, dy: 1)
+        let path = NSBezierPath(roundedRect: insetRect,
+                                xRadius: Self.selectionRadius,
+                                yRadius: Self.selectionRadius)
+        NSColor.controlAccentColor.withAlphaComponent(Self.selectionAlpha).setFill()
+        path.fill()
+    }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        super.drawBackground(in: dirtyRect)
+        if isHovered && !isSelected {
+            let insetRect = bounds.insetBy(dx: Self.selectionInsetH, dy: 1)
+            let path = NSBezierPath(roundedRect: insetRect,
+                                    xRadius: Self.selectionRadius,
+                                    yRadius: Self.selectionRadius)
+            NSColor.labelColor.withAlphaComponent(Self.hoverAlpha).setFill()
+            path.fill()
+        }
+    }
+}
+
+// MARK: - フォーカスを受け取らない NSTableView
+
 /// 検索フィールドに常にフォーカスを維持するために使用。
 /// これにより、テーブルをクリックしてもフォーカスが移動せず、
 /// キーボード操作が常に検索フィールド経由で処理される。
@@ -12,6 +49,9 @@ private final class NonFocusTableView: NSTableView {
     /// SearchWindow が orderedSelection を自前管理するために使用。
     var onMultiSelectClick: ((Int) -> Void)?
 
+    private var hoveredRow: Int = -1
+    private var hoverTrackingArea: NSTrackingArea?
+
     override func mouseDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // Shift+Click / Cmd+Click → カスタムマルチセレクト処理
@@ -22,6 +62,47 @@ private final class NonFocusTableView: NSTableView {
             return
         }
         super.mouseDown(with: event)
+    }
+
+    // MARK: - ホバートラッキング
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = hoverTrackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: point)
+        guard row != hoveredRow else { return }
+        if hoveredRow >= 0,
+           let oldRow = rowView(atRow: hoveredRow, makeIfNecessary: false) as? ModernRowView {
+            oldRow.isHovered = false
+        }
+        hoveredRow = row
+        if row >= 0,
+           let newRow = rowView(atRow: row, makeIfNecessary: false) as? ModernRowView {
+            newRow.isHovered = true
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        clearHover()
+    }
+
+    /// ホバー状態をリセットする。データ再読み込み時にも呼ばれる。
+    func clearHover() {
+        if hoveredRow >= 0,
+           let oldRow = rowView(atRow: hoveredRow, makeIfNecessary: false) as? ModernRowView {
+            oldRow.isHovered = false
+        }
+        hoveredRow = -1
     }
 }
 
@@ -53,6 +134,14 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         static let space: UInt16 = 49
     }
 
+    /// ウィンドウ開閉アニメーションの定数
+    private enum Anim {
+        static let showDuration: CFTimeInterval = 0.15
+        static let dismissDuration: CFTimeInterval = 0.1
+        static let showScale: CGFloat = 0.96
+        static let dismissScale: CGFloat = 0.98
+    }
+
     /// レイアウト定数。プリセットにより値が変わる。
     private let layout: LayoutConfig
 
@@ -68,7 +157,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private let searchField = NSTextField()
     private let scrollView = NSScrollView()
     private let tableView = NonFocusTableView()
-    private let hintLabel = NSTextField(labelWithString: "")
+    private let hintStackView = NSStackView()
     private let suggestionLabel = NSTextField(labelWithString: "")
 
     /// タグフィルタバッジ（検索フィールド左に表示、複数対応）
@@ -77,6 +166,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private var searchFieldLeading: NSLayoutConstraint!
     /// 検索アイコンの参照
     private var searchIcon: NSImageView!
+
+    private let emptyStateView = NSView()
 
     private var allClips: [ClipItem] = []
     private var allSnippets: [SnippetItem] = []
@@ -93,6 +184,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private var suppressSelectionChange = false
     /// マルチセレクト中のドラッグ操作を追跡（ドラッグ中はウィンドウを閉じない）
     private var isDragging = false
+    /// dismiss アニメーション中の連打ガード
+    private var isDismissing = false
     /// D&D 用の一時ディレクトリ（元ファイル名でハードコピーを作成）
     private static let dragTempDir = FileManager.default.temporaryDirectory
         .appendingPathComponent("FuzzyPaste-drag", isDirectory: true)
@@ -145,6 +238,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         visualEffect.wantsLayer = true
         visualEffect.layer?.cornerRadius = layout.cornerRadius
         visualEffect.layer?.masksToBounds = true
+        visualEffect.layer?.borderWidth = 0.5
+        visualEffect.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
         contentView = visualEffect
 
         let searchContainer = setupSearchField(in: visualEffect)
@@ -160,7 +255,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
         let icon = NSImageView()
         icon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
-        icon.contentTintColor = .tertiaryLabelColor
+        icon.contentTintColor = .controlAccentColor.withAlphaComponent(0.6)
         icon.translatesAutoresizingMaskIntoConstraints = false
         searchContainer.addSubview(icon)
         searchIcon = icon
@@ -205,21 +300,29 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         return searchContainer
     }
 
-    private func addSeparator(in container: NSView, below anchor: NSView) -> NSBox {
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(separator)
-
-        NSLayoutConstraint.activate([
-            separator.topAnchor.constraint(equalTo: anchor.bottomAnchor, constant: layout.sectionGap),
-            separator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-        ])
-        return separator
+    /// 0.5pt の薄いディバイダビューを生成する。
+    private func makeDivider() -> NSView {
+        let divider = NSView()
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.4).cgColor
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
+        return divider
     }
 
-    private func setupTableView(in container: NSView, below separator: NSBox) {
+    private func addSeparator(in container: NSView, below anchor: NSView) -> NSView {
+        let divider = makeDivider()
+        container.addSubview(divider)
+
+        NSLayoutConstraint.activate([
+            divider.topAnchor.constraint(equalTo: anchor.bottomAnchor, constant: layout.sectionGap),
+            divider.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: layout.windowPadding),
+            divider.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -layout.windowPadding),
+        ])
+        return divider
+    }
+
+    private func setupTableView(in container: NSView, below separator: NSView) {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ClipColumn"))
         column.title = ""
         tableView.addTableColumn(column)
@@ -251,22 +354,55 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
         ])
+
+        // 空状態ビュー
+        emptyStateView.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.isHidden = true
+        container.addSubview(emptyStateView)
+
+        let emptyIcon = NSImageView()
+        emptyIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
+        emptyIcon.contentTintColor = .tertiaryLabelColor
+        emptyIcon.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.addSubview(emptyIcon)
+
+        let emptyLabel = NSTextField(labelWithString: "一致する項目がありません")
+        emptyLabel.font = .systemFont(ofSize: layout.cellFontSize)
+        emptyLabel.textColor = .tertiaryLabelColor
+        emptyLabel.alignment = .center
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.addSubview(emptyLabel)
+
+        NSLayoutConstraint.activate([
+            emptyStateView.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            emptyStateView.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+
+            emptyIcon.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
+            emptyIcon.topAnchor.constraint(equalTo: emptyStateView.topAnchor),
+            emptyIcon.widthAnchor.constraint(equalToConstant: 32),
+            emptyIcon.heightAnchor.constraint(equalToConstant: 32),
+
+            emptyLabel.topAnchor.constraint(equalTo: emptyIcon.bottomAnchor, constant: 8),
+            emptyLabel.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
+            emptyLabel.bottomAnchor.constraint(equalTo: emptyStateView.bottomAnchor),
+        ])
     }
 
     private func setupHintBar(in container: NSView) {
         let hintBar = NSView()
+        hintBar.wantsLayer = true
+        hintBar.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.03).cgColor
         hintBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(hintBar)
 
-        let hintSeparator = NSBox()
-        hintSeparator.boxType = .separator
-        hintSeparator.translatesAutoresizingMaskIntoConstraints = false
-        hintBar.addSubview(hintSeparator)
+        let divider = makeDivider()
+        hintBar.addSubview(divider)
 
-        hintLabel.font = .systemFont(ofSize: layout.hintFontSize)
-        hintLabel.textColor = .tertiaryLabelColor
-        hintLabel.translatesAutoresizingMaskIntoConstraints = false
-        hintBar.addSubview(hintLabel)
+        hintStackView.orientation = .horizontal
+        hintStackView.spacing = 12
+        hintStackView.alignment = .centerY
+        hintStackView.translatesAutoresizingMaskIntoConstraints = false
+        hintBar.addSubview(hintStackView)
 
         NSLayoutConstraint.activate([
             scrollView.bottomAnchor.constraint(equalTo: hintBar.topAnchor),
@@ -276,29 +412,91 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             hintBar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             hintBar.heightAnchor.constraint(equalToConstant: layout.hintBarHeight),
 
-            hintSeparator.topAnchor.constraint(equalTo: hintBar.topAnchor),
-            hintSeparator.leadingAnchor.constraint(equalTo: hintBar.leadingAnchor),
-            hintSeparator.trailingAnchor.constraint(equalTo: hintBar.trailingAnchor),
+            divider.topAnchor.constraint(equalTo: hintBar.topAnchor),
+            divider.leadingAnchor.constraint(equalTo: hintBar.leadingAnchor, constant: layout.windowPadding),
+            divider.trailingAnchor.constraint(equalTo: hintBar.trailingAnchor, constant: -layout.windowPadding),
 
-            hintLabel.centerYAnchor.constraint(equalTo: hintBar.centerYAnchor),
-            hintLabel.centerXAnchor.constraint(equalTo: hintBar.centerXAnchor),
+            hintStackView.centerXAnchor.constraint(equalTo: hintBar.centerXAnchor),
+            hintStackView.centerYAnchor.constraint(equalTo: hintBar.centerYAnchor),
         ])
     }
 
     private func updateHintLabel() {
-        var parts: [String]
+        hintStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        var actions: [(key: String, label: String)]
+
         if orderedSelection.count >= 2 {
-            parts = ["⏎ or D&D \(orderedSelection.count)件ペースト"]
+            actions = [("⏎", "\(orderedSelection.count)件ペースト")]
         } else {
-            parts = ["⏎ ペースト", "⌘C コピー", "⌘Click 複数選択", "⇧Space プレビュー", "⌘E スニペット管理"]
+            actions = [
+                ("⏎", "ペースト"),
+                ("⌘\u{2009}C", "コピー"),
+                ("⌘\u{2009}Click", "複数選択"),
+                ("⇧\u{2009}Space", "プレビュー"),
+                ("⌘\u{2009}E", "スニペット管理"),
+            ]
         }
         if suggestedTag != nil {
-            parts.insert("⇥ タグ絞り込み", at: 0)
+            actions.insert(("⇥", "タグ絞り込み"), at: 0)
         }
         if !activeTagFilters.isEmpty {
-            parts.insert("⌫ フィルタ解除", at: 0)
+            actions.insert(("⌫", "フィルタ解除"), at: 0)
         }
-        hintLabel.stringValue = parts.joined(separator: "    ")
+
+        for action in actions {
+            hintStackView.addArrangedSubview(makeActionChip(keycap: action.key, label: action.label))
+        }
+    }
+
+    /// キーキャップ + ラベルのアクションチップを生成。
+    private func makeActionChip(keycap: String, label: String) -> NSView {
+        let chip = NSView()
+        chip.translatesAutoresizingMaskIntoConstraints = false
+
+        let key = makeKeycap(text: keycap)
+        chip.addSubview(key)
+
+        let lbl = NSTextField(labelWithString: label)
+        lbl.font = .systemFont(ofSize: layout.hintFontSize)
+        lbl.textColor = .tertiaryLabelColor
+        lbl.translatesAutoresizingMaskIntoConstraints = false
+        chip.addSubview(lbl)
+
+        NSLayoutConstraint.activate([
+            key.leadingAnchor.constraint(equalTo: chip.leadingAnchor),
+            key.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
+            lbl.leadingAnchor.constraint(equalTo: key.trailingAnchor, constant: 4),
+            lbl.trailingAnchor.constraint(equalTo: chip.trailingAnchor),
+            lbl.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
+            chip.heightAnchor.constraint(equalTo: key.heightAnchor),
+        ])
+        return chip
+    }
+
+    /// 角丸背景付きキーキャップビューを生成。
+    private func makeKeycap(text: String) -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 5
+        container.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+        container.layer?.borderWidth = 0.5
+        container.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: layout.hintFontSize - 1, weight: .medium)
+        label.textColor = .controlAccentColor.withAlphaComponent(0.7)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 5),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -5),
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 2),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -2),
+        ])
+        return container
     }
 
     // MARK: - Show / Dismiss
@@ -321,15 +519,39 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         orderedSelection = []
         isManualMultiSelect = false
         isDragging = false
+        isDismissing = false
         filteredItems = FuzzyMatcher.filterMixed(query: "", clips: clips, snippets: snippets)
+        (tableView as? NonFocusTableView)?.clearHover()
         tableView.reloadData()
         tableView.scrollRowToVisible(0)
+        emptyStateView.isHidden = true
+        scrollView.isHidden = false
         updateHintLabel()
 
         positionNearCursor()
+
+        // アニメーション初期状態
+        alphaValue = 0
+        contentView?.layer?.setAffineTransform(CGAffineTransform(scaleX: Anim.showScale, y: Anim.showScale))
+
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         makeFirstResponder(searchField)
+
+        // フェードイン + スケールアニメーション
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Anim.showDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            self.animator().alphaValue = 1
+        }
+        let scaleAnim = CABasicAnimation(keyPath: "transform.scale")
+        scaleAnim.fromValue = Anim.showScale
+        scaleAnim.toValue = 1.0
+        scaleAnim.duration = Anim.showDuration
+        scaleAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        scaleAnim.isRemovedOnCompletion = true
+        contentView?.layer?.setAffineTransform(.identity)
+        contentView?.layer?.add(scaleAnim, forKey: "showScale")
 
         // 先頭のアイテムを自動選択
         if !filteredItems.isEmpty {
@@ -339,9 +561,34 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     func dismiss() {
+        guard !isDismissing else { return }
+        isDismissing = true
         dismissQuickLook()
-        orderOut(nil)
-        previousApp?.activate()
+        let app = previousApp
+        previousApp = nil
+
+        // スケールダウン + フェードアウト
+        let scaleAnim = CABasicAnimation(keyPath: "transform.scale")
+        scaleAnim.fromValue = 1.0
+        scaleAnim.toValue = Anim.dismissScale
+        scaleAnim.duration = Anim.dismissDuration
+        scaleAnim.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        scaleAnim.fillMode = .forwards
+        scaleAnim.isRemovedOnCompletion = false
+        contentView?.layer?.add(scaleAnim, forKey: "dismissScale")
+
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = Anim.dismissDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            self.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            self?.contentView?.layer?.removeAnimation(forKey: "dismissScale")
+            self?.orderOut(nil)
+            self?.alphaValue = 1
+            self?.contentView?.layer?.setAffineTransform(.identity)
+            self?.isDismissing = false
+            app?.activate()
+        })
     }
 
     /// マウスカーソル付近にウィンドウを配置。画面からはみ出さないよう調整する。
@@ -522,8 +769,14 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let query = searchField.stringValue
         orderedSelection = []
         filteredItems = FuzzyMatcher.filterMixed(query: query, clips: allClips, snippets: allSnippets, tagFilters: activeTagFilters)
+        (tableView as? NonFocusTableView)?.clearHover()
         tableView.reloadData()
-        if !filteredItems.isEmpty {
+
+        let isEmpty = filteredItems.isEmpty
+        emptyStateView.isHidden = !isEmpty
+        scrollView.isHidden = isEmpty
+
+        if !isEmpty {
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             tableView.scrollRowToVisible(0)
             orderedSelection = [0]
@@ -651,6 +904,17 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         updateHintLabel()
     }
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let id = NSUserInterfaceItemIdentifier("ModernRow")
+        if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? ModernRowView {
+            existing.isHovered = false
+            return existing
+        }
+        let rowView = ModernRowView()
+        rowView.identifier = id
+        return rowView
+    }
+
     /// 可変行高: テキスト 36pt / スニペット 56pt / 画像・ファイル 80pt
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         let item = filteredItems[row]
@@ -675,11 +939,11 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             case .text(let text):
                 cellView = makeTextCell(tableView: tableView, text: text
                     .components(separatedBy: .newlines)
-                    .joined(separator: " "))
+                    .joined(separator: " "), date: clipItem.copiedAt)
             case .image(let meta):
-                cellView = makeImageCell(tableView: tableView, meta: meta)
+                cellView = makeImageCell(tableView: tableView, meta: meta, date: clipItem.copiedAt)
             case .file(let meta):
-                cellView = makeFileCell(tableView: tableView, meta: meta)
+                cellView = makeFileCell(tableView: tableView, meta: meta, date: clipItem.copiedAt)
             }
         case .snippet(let snippetItem):
             cellView = makeSnippetCell(tableView: tableView, snippet: snippetItem)
@@ -690,18 +954,22 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     // MARK: - Cell factories
 
+    private static let timestampTag = 500
+
     /// テキストアイテム用セル
-    private func makeTextCell(tableView: NSTableView, text: String) -> NSTableCellView {
+    private func makeTextCell(tableView: NSTableView, text: String, date: Date) -> NSTableCellView {
         let id = Self.textCellID
         if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView {
             existing.textField?.stringValue = text
-            // imageView を非表示に（再利用時のリセット）
-            existing.imageView?.isHidden = true
+            if let ts = existing.viewWithTag(Self.timestampTag) as? NSTextField {
+                ts.stringValue = relativeTimeString(from: date)
+            }
             return existing
         }
 
         let view = NSTableCellView()
         view.identifier = id
+
         let tf = NSTextField(labelWithString: text)
         tf.lineBreakMode = .byTruncatingTail
         tf.font = .systemFont(ofSize: layout.cellFontSize)
@@ -710,10 +978,26 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         tf.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tf)
         view.textField = tf
+
+        // タイムスタンプ
+        let ts = NSTextField(labelWithString: relativeTimeString(from: date))
+        ts.tag = Self.timestampTag
+        ts.font = .systemFont(ofSize: layout.cellFontSize - 2)
+        ts.textColor = .tertiaryLabelColor
+        ts.alignment = .right
+        ts.setContentHuggingPriority(.required, for: .horizontal)
+        ts.setContentCompressionResistancePriority(.required, for: .horizontal)
+        ts.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(ts)
+
         NSLayoutConstraint.activate([
             tf.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: layout.cellPadding),
-            tf.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -layout.cellPadding),
+            tf.trailingAnchor.constraint(equalTo: ts.leadingAnchor, constant: -8),
             tf.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+
+            ts.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -layout.cellPadding),
+            ts.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            ts.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
         ])
         return view
     }
@@ -721,7 +1005,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     /// 画像アイテム用セル（2行レイアウト）:
     /// [thumb]  filename.png       ← 上段: 太字ファイル名（なければ空）
     ///          1920×1080  2.3 MB  ← 下段: メタデータ
-    private func makeImageCell(tableView: NSTableView, meta: ImageMetadata) -> NSView {
+    private func makeImageCell(tableView: NSTableView, meta: ImageMetadata, date: Date) -> NSView {
         let id = Self.imageCellID
         let titleTag = 100
         let subtitleTag = 101
@@ -795,9 +1079,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         // 上段: ファイル名（なければ空文字）
         titleLabel.stringValue = meta.originalFileName ?? ""
 
-        // 下段: メタデータ
+        // 下段: メタデータ + タイムスタンプ
         let sizeStr = formatFileSize(meta.fileSizeBytes)
-        subtitleLabel.stringValue = "\(meta.pixelWidth)×\(meta.pixelHeight)  \(sizeStr)"
+        subtitleLabel.stringValue = "\(meta.pixelWidth)×\(meta.pixelHeight)  \(sizeStr)  \(relativeTimeString(from: date))"
 
         return cellView
     }
@@ -805,7 +1089,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     /// ファイルアイテム用セル（2行レイアウト）:
     /// [icon]  filename.pdf       <- 上段: 太字ファイル名
     ///         pdf  1.2 MB        <- 下段: 拡張子 + サイズ
-    private func makeFileCell(tableView: NSTableView, meta: FileMetadata) -> NSView {
+    private func makeFileCell(tableView: NSTableView, meta: FileMetadata, date: Date) -> NSView {
         let id = Self.fileCellID
         let titleTag = 300
         let subtitleTag = 301
@@ -876,12 +1160,13 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         // 上段: ファイル名
         titleLabel.stringValue = meta.originalFileName
 
-        // 下段: 拡張子 + サイズ
+        // 下段: 拡張子 + サイズ + タイムスタンプ
         let sizeStr = formatFileSize(meta.fileSizeBytes)
+        let timeStr = relativeTimeString(from: date)
         if meta.fileExtension.isEmpty {
-            subtitleLabel.stringValue = sizeStr
+            subtitleLabel.stringValue = "\(sizeStr)  \(timeStr)"
         } else {
-            subtitleLabel.stringValue = "\(meta.fileExtension.uppercased())  \(sizeStr)"
+            subtitleLabel.stringValue = "\(meta.fileExtension.uppercased())  \(sizeStr)  \(timeStr)"
         }
 
         return cellView
@@ -892,18 +1177,21 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     /// 下段:   内容プレビュー...
     private func makeSnippetCell(tableView: NSTableView, snippet: SnippetItem) -> NSView {
         let id = Self.snippetCellID
-        let topTag = 200  // セル内ラベル識別用
-        let bottomTag = 201  // セル内ラベル識別用
+        let topTag = 200
+        let bottomTag = 201
 
         let topLabel: NSTextField
         let bottomLabel: NSTextField
+        let timeLabel: NSTextField
         let cellView: NSView
 
         if let existing = tableView.makeView(withIdentifier: id, owner: nil),
            let existingTop = existing.viewWithTag(topTag) as? NSTextField,
-           let existingBottom = existing.viewWithTag(bottomTag) as? NSTextField {
+           let existingBottom = existing.viewWithTag(bottomTag) as? NSTextField,
+           let existingTime = existing.viewWithTag(Self.timestampTag) as? NSTextField {
             topLabel = existingTop
             bottomLabel = existingBottom
+            timeLabel = existingTime
             cellView = existing
         } else {
             cellView = NSView()
@@ -916,6 +1204,16 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             topLabel.drawsBackground = false
             topLabel.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(topLabel)
+
+            timeLabel = NSTextField(labelWithString: "")
+            timeLabel.tag = Self.timestampTag
+            timeLabel.font = .systemFont(ofSize: layout.cellFontSize - 2)
+            timeLabel.textColor = .tertiaryLabelColor
+            timeLabel.alignment = .right
+            timeLabel.setContentHuggingPriority(.required, for: .horizontal)
+            timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+            timeLabel.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(timeLabel)
 
             bottomLabel = NSTextField(labelWithString: "")
             bottomLabel.tag = bottomTag
@@ -930,7 +1228,11 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             NSLayoutConstraint.activate([
                 topLabel.topAnchor.constraint(equalTo: cellView.topAnchor, constant: 8),
                 topLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
-                topLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
+                topLabel.trailingAnchor.constraint(equalTo: timeLabel.leadingAnchor, constant: -8),
+
+                timeLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
+                timeLabel.centerYAnchor.constraint(equalTo: topLabel.centerYAnchor),
+                timeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
 
                 bottomLabel.topAnchor.constraint(equalTo: topLabel.bottomAnchor, constant: 2),
                 bottomLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding + 12),
@@ -952,6 +1254,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             attrStr.append(tagBadgeAttachment(text: tag))
         }
         topLabel.attributedStringValue = attrStr
+
+        // タイムスタンプ
+        timeLabel.stringValue = relativeTimeString(from: snippet.createdAt)
 
         // 下段: 内容プレビュー
         let preview = snippet.content
@@ -1271,6 +1576,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             NSLog("FuzzyPaste: dragFileURL copy failed: \(error)")
             return sourceURL
         }
+    }
+
+    /// 相対時間を短い文字列にフォーマット。
+    private func relativeTimeString(from date: Date) -> String {
+        let seconds = max(0, Int(-date.timeIntervalSinceNow))
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(seconds / 60)m" }
+        if seconds < 86400 { return "\(seconds / 3600)h" }
+        return "\(seconds / 86400)d"
     }
 
     /// ファイルサイズを人間が読みやすい形式にフォーマット。
