@@ -5,7 +5,7 @@ import Foundation
 ///
 /// 例: クエリ "hlo" は "hello world" にマッチする（h...l...o の順で見つかる）
 /// 例: クエリ "olh" は "hello world" にマッチしない（順番が違う）
-enum FuzzyMatcher {
+public enum FuzzyMatcher {
     /// マッチ判定とスコア計算。マッチしなければ nil を返す。
     ///
     /// スコアリング: 連続一致にボーナスを与える。
@@ -13,7 +13,7 @@ enum FuzzyMatcher {
     /// - 2文字目の連続一致 → +2（累積）
     /// - 途切れたらリセット
     /// これにより "hello" で検索したとき、"hello world" が "h.e" より上位にくる。
-    static func match(query: String, target: String) -> Int? {
+    public static func match(query: String, target: String) -> Int? {
         let query = query.lowercased()
         let target = target.lowercased()
 
@@ -41,7 +41,7 @@ enum FuzzyMatcher {
 
     /// クエリでアイテム一覧をフィルタリングし、スコア降順でソートして返す。
     /// クエリが空の場合は全件をそのまま返す。
-    static func filter(query: String, items: [ClipItem]) -> [ClipItem] {
+    public static func filter(query: String, items: [ClipItem]) -> [ClipItem] {
         if query.isEmpty { return items }
         return items
             .compactMap { item -> (item: ClipItem, score: Int)? in
@@ -58,7 +58,7 @@ enum FuzzyMatcher {
     /// 画像・ファイルはファイル名で検索対象にする。
     /// クエリが空の場合、クリップ履歴のみを表示（スニペットは検索時のみ混合）。
     /// tagFilters が指定された場合、全てのタグを持つスニペットのみ表示（クリップは除外）。
-    static func filterMixed(query: String, clips: [ClipItem], snippets: [SnippetItem], tagFilters: [String] = []) -> [SearchResultItem] {
+    public static func filterMixed(query: String, clips: [ClipItem], snippets: [SnippetItem], tagFilters: [String] = []) -> [SearchResultItem] {
         if !tagFilters.isEmpty {
             let filtered = snippets.filter { snippet in
                 tagFilters.allSatisfy { snippet.tags.contains($0) }
@@ -108,8 +108,9 @@ enum FuzzyMatcher {
         return scored.sorted { $0.score > $1.score }.map(\.item)
     }
 
-    /// スニペットの title, content, tags からベストスコアを返す
-    private static func bestSnippetScore(query: String, snippet: SnippetItem) -> Int? {
+    /// スニペットの title, content, tags からベストスコアを返す。
+    /// CLI の検索機能でも使用するため public。
+    public static func bestSnippetScore(query: String, snippet: SnippetItem) -> Int? {
         var scores: [Int?] = [
             match(query: query, target: snippet.title),
             match(query: query, target: snippet.content),

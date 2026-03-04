@@ -1,4 +1,5 @@
 import AppKit
+import FuzzyPasteCore
 
 // MARK: - カスタム行ビュー（角丸セレクション + ホバーエフェクト）
 

@@ -1,4 +1,6 @@
 import AppKit
+import FuzzyPasteCore
+import UniformTypeIdentifiers
 
 /// クリックを透過するプレースホルダーラベル。
 /// テキストビューの上に重ねてもクリックがテキストビューに到達する。
@@ -49,6 +51,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         static let inputCornerRadius: CGFloat = 6
         static let inputBorderWidth: CGFloat = 0.5
         static let inputPadding: CGFloat = 8
+        static let toolbarHeight: CGFloat = 24
     }
 
     private enum KeyCode {
@@ -76,6 +79,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private let tagContainer = TagFlowContainer()
     private let addButton = NSButton(frame: .zero)
     private let removeButton = NSButton(frame: .zero)
+    private let actionButton = NSButton(frame: .zero)
 
     // MARK: - 状態
 
@@ -209,31 +213,22 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         tableScrollView.translatesAutoresizingMaskIntoConstraints = false
         tableWrapper.addSubview(tableScrollView)
 
-        // ── セパレータ（テーブルとボタンバーの境界） ──
+        // ── セパレータ（テーブルとツールバーの境界） ──
         let separator = NSBox()
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
         tableWrapper.addSubview(separator)
 
-        // ── ボタン（ラッパー内のツールバーとして配置） ──
-        addButton.title = "＋ 追加"
-        addButton.bezelStyle = .rounded
-        addButton.controlSize = .regular
-        addButton.font = .systemFont(ofSize: 12, weight: .medium)
-        addButton.target = self
-        addButton.action = #selector(addClicked)
-        addButton.translatesAutoresizingMaskIntoConstraints = false
+        // ── ツールバー: [+] [−]          [⋯] （macOS 標準パターン） ──
+        configureToolbarButton(addButton, symbol: "plus", toolTip: "追加 (⌘N)", action: #selector(addClicked))
         tableWrapper.addSubview(addButton)
 
-        removeButton.title = "削除"
-        removeButton.bezelStyle = .rounded
-        removeButton.controlSize = .regular
-        removeButton.font = .systemFont(ofSize: 12)
-        removeButton.target = self
-        removeButton.action = #selector(removeClicked)
+        configureToolbarButton(removeButton, symbol: "minus", toolTip: "削除 (⌘⌫)", action: #selector(removeClicked))
         removeButton.isEnabled = false
-        removeButton.translatesAutoresizingMaskIntoConstraints = false
         tableWrapper.addSubview(removeButton)
+
+        configureToolbarButton(actionButton, symbol: "ellipsis.circle", toolTip: "インポート / エクスポート", action: #selector(actionClicked))
+        tableWrapper.addSubview(actionButton)
 
         // ── 空状態メッセージ ──
         let emptyStr = NSMutableAttributedString()
@@ -251,7 +246,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             .font: NSFont.systemFont(ofSize: 12, weight: .light),
             .paragraphStyle: pStyle,
         ]))
-        emptyStr.append(NSAttributedString(string: "「＋ 追加」で登録", attributes: [
+        emptyStr.append(NSAttributedString(string: "＋ ボタンで登録", attributes: [
             .foregroundColor: NSColor.tertiaryLabelColor,
             .font: NSFont.systemFont(ofSize: 11),
             .paragraphStyle: pStyle,
@@ -281,13 +276,23 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
             separator.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor),
-            separator.bottomAnchor.constraint(equalTo: addButton.topAnchor, constant: -10),
+            separator.bottomAnchor.constraint(equalTo: addButton.topAnchor),
 
-            addButton.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor, constant: 8),
-            addButton.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor, constant: -10),
+            // ツールバー: [+] [−]          [⚙]
+            addButton.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor, constant: 4),
+            addButton.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor),
+            addButton.heightAnchor.constraint(equalToConstant: Layout.toolbarHeight),
+            addButton.widthAnchor.constraint(equalToConstant: Layout.toolbarHeight),
 
-            removeButton.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor, constant: -8),
-            removeButton.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor, constant: -10),
+            removeButton.leadingAnchor.constraint(equalTo: addButton.trailingAnchor),
+            removeButton.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor),
+            removeButton.heightAnchor.constraint(equalToConstant: Layout.toolbarHeight),
+            removeButton.widthAnchor.constraint(equalToConstant: Layout.toolbarHeight),
+
+            actionButton.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor, constant: -4),
+            actionButton.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor),
+            actionButton.heightAnchor.constraint(equalToConstant: Layout.toolbarHeight),
+            actionButton.widthAnchor.constraint(equalToConstant: Layout.toolbarHeight),
 
             emptyStateLabel.centerXAnchor.constraint(equalTo: tableScrollView.centerXAnchor),
             emptyStateLabel.centerYAnchor.constraint(equalTo: tableScrollView.centerYAnchor),
@@ -417,6 +422,19 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         view.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
+    }
+
+    /// ツールバー用ボーダレスアイコンボタンを設定するヘルパー
+    private func configureToolbarButton(_ button: NSButton, symbol: String, toolTip: String, action: Selector) {
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: toolTip)
+        button.bezelStyle = .smallSquare
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.target = self
+        button.action = action
+        button.toolTip = toolTip
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setContentHuggingPriority(.required, for: .horizontal)
     }
 
     /// セクションラベルを生成するヘルパー
@@ -655,6 +673,101 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         updateEmptyState()
         makeFirstResponder(titleField)
         titleField.selectText(nil)
+    }
+
+    @objc private func actionClicked() {
+        let menu = NSMenu()
+        let importItem = NSMenuItem(title: "インポート…", action: #selector(importClicked), keyEquivalent: "")
+        importItem.target = self
+        menu.addItem(importItem)
+        let exportItem = NSMenuItem(title: "エクスポート…", action: #selector(exportClicked), keyEquivalent: "")
+        exportItem.target = self
+        menu.addItem(exportItem)
+
+        let point = NSPoint(x: 0, y: actionButton.bounds.height)
+        menu.popUp(positioning: nil, at: point, in: actionButton)
+    }
+
+    @objc private func importClicked() {
+        let openPanel = NSOpenPanel()
+        openPanel.allowedContentTypes = [.json]
+        openPanel.canChooseFiles = true
+        openPanel.canChooseDirectories = false
+        openPanel.allowsMultipleSelection = false
+        openPanel.message = "インポートする JSON ファイルを選択してください"
+
+        guard openPanel.runModal() == .OK, let url = openPanel.url else { return }
+
+        do {
+            let result = try store.parseImportFile(url: url)
+            let total = result.new.count + result.duplicates.count
+
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "スニペットをインポート"
+
+            if result.new.isEmpty {
+                alert.informativeText = "ファイル内: \(total)件\n\nすべて既存のスニペットと重複しています。\nインポートする項目はありません。"
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                return
+            }
+
+            var info = "ファイル内: \(total)件\n  新規追加: \(result.new.count)件"
+            if !result.duplicates.isEmpty {
+                info += "\n  重複スキップ: \(result.duplicates.count)件"
+            }
+            info += "\n\nインポートしますか？"
+            alert.informativeText = info
+            alert.addButton(withTitle: "インポート")
+            alert.addButton(withTitle: "キャンセル")
+
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+            store.importItems(result.new)
+            tableView.reloadData()
+            if !store.items.isEmpty {
+                tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            }
+            updateEditFields()
+            updateEmptyState()
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "インポートに失敗しました"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+
+    @objc private func exportClicked() {
+        guard !store.items.isEmpty else {
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "エクスポートするスニペットがありません"
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.json]
+        savePanel.nameFieldStringValue = "snippets.json"
+        savePanel.message = "スニペットのエクスポート先を選択してください"
+
+        guard savePanel.runModal() == .OK, let url = savePanel.url else { return }
+
+        do {
+            try store.exportToFile(url: url)
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "エクスポートに失敗しました"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
     }
 
     @objc private func removeClicked() {
