@@ -52,8 +52,11 @@
 - [x] 履歴設定（最大保持件数 100〜2000件、履歴の全削除）
 - [x] ショートカットキー設定（起動ホットキーのカスタマイズ）
 - [x] 検索ウィンドウ モダン化（カスタム選択ハイライト・ホバーエフェクト・開閉アニメーション・コンテンツタイプアイコン・タイムスタンプ・キーキャップ付きアクションバー・空状態表示）
+- [x] スニペット Import/Export（JSON エクスポート・インポート、プレビュー・重複検出付き）
 - [ ] 自動起動 (SMAppService)
 - [x] アクセシビリティ権限チェック・リクエスト（オンボーディング画面統合）
+- [x] FuzzyPasteCore ライブラリ分離（SnippetStore, HistoryStore, FuzzyMatcher, SearchResultItem を共有ライブラリに切り出し）
+- [x] fpaste CLI ツール（list, add, remove, search, import, export サブコマンド）
 
 ## 配布
 

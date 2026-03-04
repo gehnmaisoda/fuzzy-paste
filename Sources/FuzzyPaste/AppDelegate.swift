@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import FuzzyPasteCore
 
 /// アプリ全体のライフサイクルを管理する司令塔。
 /// メニューバー常駐、クリップボード監視、ホットキー、検索ウィンドウを統括する。

@@ -1,3 +1,4 @@
+import FuzzyPasteCore
 import SwiftUI
 
 /// 履歴設定ビュー。最大保持件数の変更と履歴の全削除ができる。

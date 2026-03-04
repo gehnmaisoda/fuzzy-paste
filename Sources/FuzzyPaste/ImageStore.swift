@@ -1,4 +1,5 @@
 import AppKit
+import FuzzyPasteCore
 import ImageIO
 
 /// 画像ファイルの保存・読み込み・サムネイル生成を担当するストア。

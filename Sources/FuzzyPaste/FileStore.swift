@@ -1,4 +1,5 @@
 import AppKit
+import FuzzyPasteCore
 import UniformTypeIdentifiers
 
 /// ファイルの保存・アイコン取得・削除を担当するストア。
