@@ -72,12 +72,25 @@ final class FileStore {
         }
 
         let icon: NSImage
+        let symbolName: String
         if let type = UTType(filenameExtension: metadata.fileExtension) {
-            icon = NSWorkspace.shared.icon(for: type)
+            if type.conforms(to: .image) {
+                symbolName = "photo"
+            } else if type.conforms(to: .pdf) {
+                symbolName = "doc.richtext"
+            } else if type.conforms(to: .sourceCode) || type.conforms(to: .plainText) {
+                symbolName = "doc.text"
+            } else if type.conforms(to: .archive) {
+                symbolName = "doc.zipper"
+            } else {
+                symbolName = "doc"
+            }
         } else {
-            icon = NSWorkspace.shared.icon(for: .data)
+            symbolName = "doc"
         }
-        icon.size = NSSize(width: 64, height: 64)
+        let config = NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        icon = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) ?? NSImage(systemSymbolName: "doc", accessibilityDescription: nil)!
         iconCache.setObject(icon, forKey: key)
         return icon
     }
