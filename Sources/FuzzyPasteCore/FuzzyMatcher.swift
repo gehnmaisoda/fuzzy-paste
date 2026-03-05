@@ -59,8 +59,9 @@ public enum FuzzyMatcher {
     /// クエリが空の場合、クリップ履歴のみを表示（スニペットは検索時のみ混合）。
     /// tagFilters が指定された場合、全てのタグを持つスニペットのみ表示（クリップは除外）。
     public static func filterMixed(query: String, clips: [ClipItem], snippets: [SnippetItem], tagFilters: [String] = []) -> [SearchResultItem] {
+        let activeSnippets = snippets.filter(\.hasContent)
         if !tagFilters.isEmpty {
-            let filtered = snippets.filter { snippet in
+            let filtered = activeSnippets.filter { snippet in
                 tagFilters.allSatisfy { snippet.tags.contains($0) }
             }
             if query.isEmpty {
@@ -99,7 +100,7 @@ public enum FuzzyMatcher {
             }
         }
 
-        for snippet in snippets {
+        for snippet in activeSnippets {
             if let bestScore = bestSnippetScore(query: query, snippet: snippet) {
                 scored.append((.snippet(snippet), bestScore))
             }
