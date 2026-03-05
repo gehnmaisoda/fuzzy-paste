@@ -13,12 +13,18 @@ let package = Package(
     targets: [
         .target(
             name: "FuzzyPasteCore",
-            path: "Sources/FuzzyPasteCore"
+            path: "Sources/FuzzyPasteCore",
+            swiftSettings: [
+                .define("DEV", .when(configuration: .debug))
+            ]
         ),
         .executableTarget(
             name: "FuzzyPaste",
             dependencies: ["FuzzyPasteCore"],
-            path: "Sources/FuzzyPaste"
+            path: "Sources/FuzzyPaste",
+            swiftSettings: [
+                .define("DEV", .when(configuration: .debug))
+            ]
         ),
         .executableTarget(
             name: "fpaste",
@@ -26,7 +32,10 @@ let package = Package(
                 "FuzzyPasteCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/fpaste"
+            path: "Sources/fpaste",
+            swiftSettings: [
+                .define("DEV", .when(configuration: .debug))
+            ]
         ),
     ]
 )

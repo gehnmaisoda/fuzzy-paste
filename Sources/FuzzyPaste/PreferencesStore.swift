@@ -188,9 +188,7 @@ final class PreferencesStore: ObservableObject {
     }
 
     init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("FuzzyPaste")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = AppPaths.appSupportDir
         fileURL = dir.appendingPathComponent("preferences.json")
         load()
     }

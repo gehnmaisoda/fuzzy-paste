@@ -35,7 +35,7 @@ relaunch: bundle
 hard_reset:
 	-pkill -x $(APP_NAME)
 	tccutil reset Accessibility $(BUNDLE_ID)
-	rm -rf ~/Library/Application\ Support/FuzzyPaste
+	rm -rf ~/Library/Application\ Support/FuzzyPaste-Dev
 	@echo "Hard reset complete"
 
 clean:

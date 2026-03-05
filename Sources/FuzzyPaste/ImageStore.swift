@@ -16,9 +16,7 @@ final class ImageStore {
     private static let thumbMaxPixels = 512
 
     init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let base = appSupport.appendingPathComponent("FuzzyPaste")
-        imagesDir = base.appendingPathComponent("images")
+        imagesDir = AppPaths.appSupportDir.appendingPathComponent("images")
         thumbsDir = imagesDir.appendingPathComponent("thumbs")
         try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: thumbsDir, withIntermediateDirectories: true)

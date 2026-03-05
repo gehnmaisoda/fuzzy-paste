@@ -12,9 +12,7 @@ final class FileStore {
     private let iconCache = NSCache<NSString, NSImage>()
 
     init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let base = appSupport.appendingPathComponent("FuzzyPaste")
-        filesDir = base.appendingPathComponent("files")
+        filesDir = AppPaths.appSupportDir.appendingPathComponent("files")
         try? FileManager.default.createDirectory(at: filesDir, withIntermediateDirectories: true)
         iconCache.countLimit = 100
     }

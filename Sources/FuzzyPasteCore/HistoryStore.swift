@@ -97,9 +97,7 @@ public final class HistoryStore {
     public var onFileDelete: ((String) -> Void)?
 
     public init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("FuzzyPaste")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = AppPaths.appSupportDir
         fileURL = dir.appendingPathComponent("history.json")
         load()
     }
