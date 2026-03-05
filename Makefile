@@ -5,32 +5,30 @@ BUILD_DIR = .build/release
 APP_BUNDLE = $(APP_NAME).app
 DEV_FLAGS = -Xswiftc -DDEV
 
-.PHONY: build run clean bundle relaunch hard_reset install
+.PHONY: run relaunch relaunch_release hard_reset clean
 
-build:
-	swift build $(DEV_FLAGS)
-
-run: build
-	.build/debug/$(APP_NAME)
-
-bundle:
-	swift build -c release $(DEV_FLAGS)
+define make_bundle
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
 	cp $(BUILD_DIR)/$(APP_NAME) $(APP_BUNDLE)/Contents/MacOS/
 	cp $(BUILD_DIR)/$(CLI_NAME) $(APP_BUNDLE)/Contents/MacOS/
 	cp Resources/Info.plist $(APP_BUNDLE)/Contents/
-	@echo "Created $(APP_BUNDLE)"
-
-install:
-	swift build -c release $(DEV_FLAGS)
-	ln -sf $(abspath $(BUILD_DIR)/$(CLI_NAME)) /usr/local/bin/$(CLI_NAME)
-	@echo "Installed $(CLI_NAME) -> /usr/local/bin/$(CLI_NAME)"
-
-relaunch: bundle
 	-pkill -x $(APP_NAME)
 	open $(APP_BUNDLE)
+endef
+
+run:
+	swift build $(DEV_FLAGS)
+	.build/debug/$(APP_NAME)
+
+relaunch:
+	swift build -c release $(DEV_FLAGS)
+	$(make_bundle)
+
+relaunch_release:
+	swift build -c release
+	$(make_bundle)
 
 hard_reset:
 	-pkill -x $(APP_NAME)
