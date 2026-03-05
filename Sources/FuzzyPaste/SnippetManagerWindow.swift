@@ -311,7 +311,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: - 定数
 
     private enum Layout {
-        static let windowSize = NSSize(width: 840, height: 576)
+        static let windowSize = NSSize(width: 1008, height: 691)
         static let cornerRadius: CGFloat = 14
         static let padding: CGFloat = 24
         static let listWidth: CGFloat = 240
@@ -333,9 +333,13 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     }
 
     private enum KeyCode {
+        static let a: UInt16 = 0
+        static let c: UInt16 = 8
+        static let v: UInt16 = 9
+        static let x: UInt16 = 7
+        static let z: UInt16 = 6
         static let w: UInt16 = 13
         static let n: UInt16 = 45
-        static let a: UInt16 = 0
         static let delete: UInt16 = 51
     }
 
@@ -752,6 +756,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         imageContentContainer.addSubview(imageWrapper)
 
         imagePreviewView.imageScaling = .scaleProportionallyDown
+        imagePreviewView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        imagePreviewView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         imagePreviewView.translatesAutoresizingMaskIntoConstraints = false
         imageWrapper.addSubview(imagePreviewView)
 
@@ -1015,10 +1021,25 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
                 return true
             }
         }
-        // Cmd+A: ファーストレスポンダ（テキストフィールド/ビュー）に全選択を委譲
-        if event.keyCode == KeyCode.a && flags == .command {
-            firstResponder?.tryToPerform(#selector(NSText.selectAll(_:)), with: nil)
-            return true
+        // 標準の編集コマンドをファーストレスポンダに委譲
+        // （メインメニューを持たない LSUIElement アプリでは自動転送されないため）
+        if flags == .command {
+            let action: Selector? = switch event.keyCode {
+            case KeyCode.v: #selector(NSText.paste(_:))
+            case KeyCode.c: #selector(NSText.copy(_:))
+            case KeyCode.x: #selector(NSText.cut(_:))
+            case KeyCode.a: #selector(NSText.selectAll(_:))
+            case KeyCode.z: #selector(UndoManager.undo)
+            default: nil
+            }
+            if let action, firstResponder?.tryToPerform(action, with: nil) == true {
+                return true
+            }
+        }
+        if flags == [.command, .shift] && event.keyCode == KeyCode.z {
+            if firstResponder?.tryToPerform(#selector(UndoManager.redo), with: nil) == true {
+                return true
+            }
         }
         return super.performKeyEquivalent(with: event)
     }
@@ -1062,8 +1083,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         // ── アイコン: コンテンツ型で切替 ──
         switch item.content {
         case .text:
-            iconView.image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: nil)
-            iconView.contentTintColor = NSColor.systemOrange.withAlphaComponent(0.7)
+            iconView.image = NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil)
+            iconView.contentTintColor = NSColor.secondaryLabelColor
         case .image:
             iconView.image = NSImage(systemSymbolName: "photo.fill", accessibilityDescription: nil)
             iconView.contentTintColor = NSColor.systemBlue.withAlphaComponent(0.7)
@@ -1103,8 +1124,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
         let iconView = NSImageView()
         iconView.tag = CellTag.icon
-        iconView.image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: nil)
-        iconView.contentTintColor = NSColor.systemOrange.withAlphaComponent(0.7)
+        iconView.image = NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil)
+        iconView.contentTintColor = NSColor.secondaryLabelColor
         iconView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(iconView)
 
@@ -1123,7 +1144,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         view.addSubview(previewTF)
 
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            iconView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
             iconView.topAnchor.constraint(equalTo: view.topAnchor, constant: 9),
             iconView.widthAnchor.constraint(equalToConstant: 14),
             iconView.heightAnchor.constraint(equalToConstant: 14),
@@ -1291,7 +1312,42 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     @objc private func typeSegmentChanged() {
         let row = tableView.selectedRow
         guard row >= 0, row < store.items.count else { return }
+        let item = store.items[row]
 
+        let hasContent: Bool
+        switch item.content {
+        case .text(let text): hasContent = !text.isEmpty
+        case .image, .file: hasContent = true
+        }
+
+        // 同じタイプへの変更は確認不要
+        let isSameType: Bool
+        switch (item.content, typeSegment.selectedSegment) {
+        case (.text, 0), (.image, 1), (.file, 2): isSameType = true
+        default: isSameType = false
+        }
+
+        if hasContent && !isSameType {
+            let alert = NSAlert()
+            alert.messageText = "タイプを変更しますか？"
+            alert.informativeText = "現在の内容は失われます。"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "変更")
+            alert.addButton(withTitle: "キャンセル")
+            alert.beginSheetModal(for: self) { [weak self] response in
+                guard let self else { return }
+                if response == .alertFirstButtonReturn {
+                    self.applyTypeChange()
+                } else {
+                    self.revertTypeSegment()
+                }
+            }
+        } else {
+            applyTypeChange()
+        }
+    }
+
+    private func applyTypeChange() {
         switch typeSegment.selectedSegment {
         case 0: changeToText()
         case 1: changeToImage()

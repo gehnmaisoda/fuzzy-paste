@@ -146,12 +146,18 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     /// レイアウト定数。プリセットにより値が変わる。
     private let layout: LayoutConfig
 
-    // MARK: - セル識別子
+    // MARK: - セル識別子・タグ
 
     private static let textCellID = NSUserInterfaceItemIdentifier("ClipCell")
     private static let snippetCellID = NSUserInterfaceItemIdentifier("SnippetCell")
     private static let imageCellID = NSUserInterfaceItemIdentifier("ImageClipCell")
     private static let fileCellID = NSUserInterfaceItemIdentifier("FileClipCell")
+
+    private static let timestampTag = 500
+    private static let imageTitleTag = 100
+    private static let imageSubtitleTag = 101
+    private static let fileTitleTag = 300
+    private static let fileSubtitleTag = 301
 
     // MARK: - プロパティ
 
@@ -993,15 +999,20 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 cellView = makeFileCell(tableView: tableView, meta: meta, date: clipItem.copiedAt)
             }
         case .snippet(let snippetItem):
-            cellView = makeSnippetCell(tableView: tableView, snippet: snippetItem)
+            switch snippetItem.content {
+            case .text:
+                cellView = makeSnippetCell(tableView: tableView, snippet: snippetItem)
+            case .image(let meta):
+                cellView = makeSnippetImageCell(tableView: tableView, snippet: snippetItem, meta: meta)
+            case .file(let meta):
+                cellView = makeSnippetFileCell(tableView: tableView, snippet: snippetItem, meta: meta)
+            }
         }
         configureSelectionBadge(in: cellView, row: row)
         return cellView
     }
 
     // MARK: - Cell factories
-
-    private static let timestampTag = 500
 
     /// テキストアイテム用セル
     private func makeTextCell(tableView: NSTableView, text: String, date: Date) -> NSTableCellView {
@@ -1050,25 +1061,28 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     /// 画像アイテム用セル（2行レイアウト）:
-    /// [thumb]  filename.png       ← 上段: 太字ファイル名（なければ空）
-    ///          1920×1080  2.3 MB  ← 下段: メタデータ
+    /// [thumb]  filename.png       5m ← 上段: 太字ファイル名 + タイムスタンプ
+    ///          1920×1080  2.3 MB     ← 下段: メタデータ
     private func makeImageCell(tableView: NSTableView, meta: ImageMetadata, date: Date) -> NSView {
         let id = Self.imageCellID
-        let titleTag = 100
-        let subtitleTag = 101
+        let titleTag = Self.imageTitleTag
+        let subtitleTag = Self.imageSubtitleTag
 
         let thumbView: NSImageView
         let titleLabel: NSTextField
         let subtitleLabel: NSTextField
+        let timeLabel: NSTextField
         let cellView: NSTableCellView
 
         if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView,
            let existingThumb = existing.imageView,
            let existingTitle = existing.viewWithTag(titleTag) as? NSTextField,
-           let existingSub = existing.viewWithTag(subtitleTag) as? NSTextField {
+           let existingSub = existing.viewWithTag(subtitleTag) as? NSTextField,
+           let existingTime = existing.viewWithTag(Self.timestampTag) as? NSTextField {
             thumbView = existingThumb
             titleLabel = existingTitle
             subtitleLabel = existingSub
+            timeLabel = existingTime
             cellView = existing
         } else {
             cellView = NSTableCellView()
@@ -1092,6 +1106,16 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             titleLabel.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(titleLabel)
 
+            timeLabel = NSTextField(labelWithString: "")
+            timeLabel.tag = Self.timestampTag
+            timeLabel.font = .systemFont(ofSize: layout.cellFontSize - 2)
+            timeLabel.textColor = .tertiaryLabelColor
+            timeLabel.alignment = .right
+            timeLabel.setContentHuggingPriority(.required, for: .horizontal)
+            timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+            timeLabel.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(timeLabel)
+
             subtitleLabel = NSTextField(labelWithString: "")
             subtitleLabel.tag = subtitleTag
             subtitleLabel.lineBreakMode = .byTruncatingTail
@@ -1110,11 +1134,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 thumbView.heightAnchor.constraint(equalToConstant: layout.thumbSize),
 
                 textLeading.constraint(equalToConstant: 8),
-                titleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
+                titleLabel.trailingAnchor.constraint(equalTo: timeLabel.leadingAnchor, constant: -8),
                 titleLabel.bottomAnchor.constraint(equalTo: cellView.centerYAnchor, constant: -1),
 
+                timeLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
+                timeLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+                timeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
+
                 subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-                subtitleLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+                subtitleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
                 subtitleLabel.topAnchor.constraint(equalTo: cellView.centerYAnchor, constant: 1),
             ])
         }
@@ -1126,33 +1154,39 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         // 上段: ファイル名（なければ空文字）
         titleLabel.stringValue = meta.originalFileName ?? ""
 
-        // 下段: メタデータ + タイムスタンプ
+        // タイムスタンプ
+        timeLabel.stringValue = relativeTimeString(from: date)
+
+        // 下段: メタデータ
         let sizeStr = formatFileSize(meta.fileSizeBytes)
-        subtitleLabel.stringValue = "\(meta.pixelWidth)×\(meta.pixelHeight)  \(sizeStr)  \(relativeTimeString(from: date))"
+        subtitleLabel.stringValue = "\(meta.pixelWidth)×\(meta.pixelHeight)  \(sizeStr)"
 
         return cellView
     }
 
     /// ファイルアイテム用セル（2行レイアウト）:
-    /// [icon]  filename.pdf       <- 上段: 太字ファイル名
-    ///         pdf  1.2 MB        <- 下段: 拡張子 + サイズ
+    /// [icon]  filename.pdf       5m <- 上段: 太字ファイル名 + タイムスタンプ
+    ///         pdf  1.2 MB           <- 下段: 拡張子 + サイズ
     private func makeFileCell(tableView: NSTableView, meta: FileMetadata, date: Date) -> NSView {
         let id = Self.fileCellID
-        let titleTag = 300
-        let subtitleTag = 301
+        let titleTag = Self.fileTitleTag
+        let subtitleTag = Self.fileSubtitleTag
 
         let iconView: NSImageView
         let titleLabel: NSTextField
         let subtitleLabel: NSTextField
+        let timeLabel: NSTextField
         let cellView: NSTableCellView
 
         if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView,
            let existingIcon = existing.imageView,
            let existingTitle = existing.viewWithTag(titleTag) as? NSTextField,
-           let existingSub = existing.viewWithTag(subtitleTag) as? NSTextField {
+           let existingSub = existing.viewWithTag(subtitleTag) as? NSTextField,
+           let existingTime = existing.viewWithTag(Self.timestampTag) as? NSTextField {
             iconView = existingIcon
             titleLabel = existingTitle
             subtitleLabel = existingSub
+            timeLabel = existingTime
             cellView = existing
         } else {
             cellView = NSTableCellView()
@@ -1173,6 +1207,16 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             titleLabel.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(titleLabel)
 
+            timeLabel = NSTextField(labelWithString: "")
+            timeLabel.tag = Self.timestampTag
+            timeLabel.font = .systemFont(ofSize: layout.cellFontSize - 2)
+            timeLabel.textColor = .tertiaryLabelColor
+            timeLabel.alignment = .right
+            timeLabel.setContentHuggingPriority(.required, for: .horizontal)
+            timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+            timeLabel.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(timeLabel)
+
             subtitleLabel = NSTextField(labelWithString: "")
             subtitleLabel.tag = subtitleTag
             subtitleLabel.lineBreakMode = .byTruncatingTail
@@ -1187,15 +1231,19 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             NSLayoutConstraint.activate([
                 iconView.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
                 iconView.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-                iconView.widthAnchor.constraint(equalToConstant: layout.thumbSize),
-                iconView.heightAnchor.constraint(equalToConstant: layout.thumbSize),
+                iconView.widthAnchor.constraint(equalToConstant: layout.thumbSize * 0.5),
+                iconView.heightAnchor.constraint(equalToConstant: layout.thumbSize * 0.5),
 
                 textLeading.constraint(equalToConstant: 8),
-                titleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
+                titleLabel.trailingAnchor.constraint(equalTo: timeLabel.leadingAnchor, constant: -8),
                 titleLabel.bottomAnchor.constraint(equalTo: cellView.centerYAnchor, constant: -1),
 
+                timeLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
+                timeLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+                timeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
+
                 subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-                subtitleLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+                subtitleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
                 subtitleLabel.topAnchor.constraint(equalTo: cellView.centerYAnchor, constant: 1),
             ])
         }
@@ -1207,16 +1255,57 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         // 上段: ファイル名
         titleLabel.stringValue = meta.originalFileName
 
-        // 下段: 拡張子 + サイズ + タイムスタンプ
+        // タイムスタンプ
+        timeLabel.stringValue = relativeTimeString(from: date)
+
+        // 下段: 拡張子 + サイズ
         let sizeStr = formatFileSize(meta.fileSizeBytes)
-        let timeStr = relativeTimeString(from: date)
         if meta.fileExtension.isEmpty {
-            subtitleLabel.stringValue = "\(sizeStr)  \(timeStr)"
+            subtitleLabel.stringValue = sizeStr
         } else {
-            subtitleLabel.stringValue = "\(meta.fileExtension.uppercased())  \(sizeStr)  \(timeStr)"
+            subtitleLabel.stringValue = "\(meta.fileExtension.uppercased())  \(sizeStr)"
         }
 
         return cellView
+    }
+
+    /// スニペット画像セル: makeImageCell を再利用し、タイトルをスニペット名に差し替え
+    private func makeSnippetImageCell(tableView: NSTableView, snippet: SnippetItem, meta: ImageMetadata) -> NSView {
+        let cell = makeImageCell(tableView: tableView, meta: meta, date: snippet.createdAt)
+        if let titleLabel = cell.viewWithTag(Self.imageTitleTag) as? NSTextField {
+            titleLabel.attributedStringValue = snippetTitleString(snippet)
+        }
+        return cell
+    }
+
+    /// スニペットファイルセル: makeFileCell を再利用し、タイトルをスニペット名に差し替え
+    private func makeSnippetFileCell(tableView: NSTableView, snippet: SnippetItem, meta: FileMetadata) -> NSView {
+        let cell = makeFileCell(tableView: tableView, meta: meta, date: snippet.createdAt)
+        if let titleLabel = cell.viewWithTag(Self.fileTitleTag) as? NSTextField {
+            titleLabel.attributedStringValue = snippetTitleString(snippet)
+        }
+        return cell
+    }
+
+    /// スニペットのタイトル行用 AttributedString（★ + タイトル + 動的バッジ + タグバッジ）
+    private func snippetTitleString(_ snippet: SnippetItem) -> NSAttributedString {
+        let attrStr = NSMutableAttributedString()
+        attrStr.append(NSAttributedString(string: "★ ", attributes: [
+            .foregroundColor: NSColor.systemOrange.withAlphaComponent(0.7),
+            .font: NSFont.systemFont(ofSize: layout.cellFontSize),
+        ]))
+        attrStr.append(NSAttributedString(string: snippet.title, attributes: [
+            .font: NSFont.systemFont(ofSize: layout.cellFontSize, weight: .medium),
+        ]))
+        if let text = snippet.text, PlaceholderParser.hasDynamicPlaceholders(in: text) {
+            attrStr.append(NSAttributedString(string: " "))
+            attrStr.append(accentBadgeAttachment(text: "{ }"))
+        }
+        for tag in snippet.tags {
+            attrStr.append(NSAttributedString(string: " "))
+            attrStr.append(tagBadgeAttachment(text: tag))
+        }
+        return attrStr
     }
 
     /// スニペット用セル（2行レイアウト）:
@@ -1288,23 +1377,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         }
 
         // 上段: ★ タイトル + タグバッジ
-        let attrStr = NSMutableAttributedString()
-        attrStr.append(NSAttributedString(string: "★ ", attributes: [
-            .foregroundColor: NSColor.systemOrange.withAlphaComponent(0.7),
-            .font: NSFont.systemFont(ofSize: layout.cellFontSize),
-        ]))
-        attrStr.append(NSAttributedString(string: snippet.title, attributes: [
-            .font: NSFont.systemFont(ofSize: layout.cellFontSize, weight: .medium),
-        ]))
-        if let text = snippet.text, PlaceholderParser.hasDynamicPlaceholders(in: text) {
-            attrStr.append(NSAttributedString(string: " "))
-            attrStr.append(accentBadgeAttachment(text: "{ }"))
-        }
-        for tag in snippet.tags {
-            attrStr.append(NSAttributedString(string: " "))
-            attrStr.append(tagBadgeAttachment(text: tag))
-        }
-        topLabel.attributedStringValue = attrStr
+        topLabel.attributedStringValue = snippetTitleString(snippet)
 
         // タイムスタンプ
         timeLabel.stringValue = relativeTimeString(from: snippet.createdAt)
