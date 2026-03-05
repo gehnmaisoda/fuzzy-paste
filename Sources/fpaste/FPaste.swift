@@ -221,8 +221,7 @@ extension FPaste {
         /// バンドルから画像・ファイルの実体をアプリのデータディレクトリにコピーし、ファイル名マッピングを返す。
         private func copyBundleFiles(from bundleDir: URL, items: [SnippetItem]) -> [String: String] {
             let fm = FileManager.default
-            let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let base = appSupport.appendingPathComponent("FuzzyPaste")
+            let base = AppPaths.appSupportDir
             let imagesDir = base.appendingPathComponent("images")
             let filesDir = base.appendingPathComponent("files")
             try? fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
@@ -304,8 +303,7 @@ extension FPaste {
 
         private func exportBundle(store: SnippetStore, items: [SnippetItem], to url: URL) async throws {
             let fm = FileManager.default
-            let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let base = appSupport.appendingPathComponent("FuzzyPaste")
+            let base = AppPaths.appSupportDir
             let appImagesDir = base.appendingPathComponent("images")
             let appFilesDir = base.appendingPathComponent("files")
 
