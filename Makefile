@@ -10,13 +10,11 @@ DEV_FLAGS = -Xswiftc -DDEV
 build:
 	swift build $(DEV_FLAGS)
 
-release:
-	swift build -c release $(DEV_FLAGS)
-
 run: build
 	.build/debug/$(APP_NAME)
 
-bundle: release
+bundle:
+	swift build -c release $(DEV_FLAGS)
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
@@ -25,7 +23,8 @@ bundle: release
 	cp Resources/Info.plist $(APP_BUNDLE)/Contents/
 	@echo "Created $(APP_BUNDLE)"
 
-install: release
+install:
+	swift build -c release $(DEV_FLAGS)
 	ln -sf $(abspath $(BUILD_DIR)/$(CLI_NAME)) /usr/local/bin/$(CLI_NAME)
 	@echo "Installed $(CLI_NAME) -> /usr/local/bin/$(CLI_NAME)"
 
