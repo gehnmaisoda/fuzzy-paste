@@ -7,6 +7,30 @@ public enum SnippetContent: Codable, Sendable, Equatable {
     case file(FileMetadata)
 }
 
+extension SnippetContent {
+    /// ファイル名マッピングを適用した新しい SnippetContent を返す。
+    /// テキストの場合はそのまま返す。
+    func remappingFileName(_ mapping: [String: String]) -> SnippetContent {
+        switch self {
+        case .text:
+            return self
+        case .image(let meta):
+            guard let newName = mapping[meta.fileName] else { return self }
+            return .image(ImageMetadata(
+                fileName: newName, originalUTType: meta.originalUTType,
+                originalFileName: meta.originalFileName,
+                pixelWidth: meta.pixelWidth, pixelHeight: meta.pixelHeight,
+                fileSizeBytes: meta.fileSizeBytes))
+        case .file(let meta):
+            guard let newName = mapping[meta.fileName] else { return self }
+            return .file(FileMetadata(
+                fileName: newName, originalFileName: meta.originalFileName,
+                fileExtension: meta.fileExtension, utType: meta.utType,
+                fileSizeBytes: meta.fileSizeBytes))
+        }
+    }
+}
+
 /// スニペットアイテム。title と content で登録し、両方で検索可能。
 public struct SnippetItem: Codable, Identifiable, Sendable {
     public let id: UUID
@@ -173,6 +197,16 @@ public final class SnippetStore {
         }
         items.insert(contentsOf: reassigned, at: 0)
         save()
+    }
+
+    /// ファイル名マッピングを適用してスニペットをインポートする（新しい UUID を割り当て）。
+    /// バンドルインポート時に、古いファイル名を新しいファイル名に置き換える。
+    public func importItems(_ newItems: [SnippetItem], fileNameMapping: [String: String]) {
+        let remapped = newItems.map { item -> SnippetItem in
+            let content = item.content.remappingFileName(fileNameMapping)
+            return SnippetItem(id: item.id, title: item.title, content: content, tags: item.tags, createdAt: item.createdAt)
+        }
+        importItems(remapped)
     }
 
     /// 重複判定用キーを生成する。

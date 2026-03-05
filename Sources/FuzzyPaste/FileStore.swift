@@ -52,6 +52,20 @@ final class FileStore {
         filesDir.appendingPathComponent(fileName)
     }
 
+    /// 外部ファイルを新しい UUID ファイル名でインポートする。
+    /// 成功時は新しいファイル名を返す。
+    func importFile(from sourceURL: URL, fileExtension ext: String) -> String? {
+        guard let data = try? Data(contentsOf: sourceURL) else { return nil }
+        let newFileName = ext.isEmpty ? UUID().uuidString : "\(UUID().uuidString).\(ext)"
+        let destURL = filesDir.appendingPathComponent(newFileName)
+        do {
+            try data.write(to: destURL, options: .atomic)
+        } catch {
+            return nil
+        }
+        return newFileName
+    }
+
     /// ファイルタイプに対応するアイコンを返す。拡張子単位でキャッシュ。
     func icon(for metadata: FileMetadata) -> NSImage {
         let key = metadata.fileExtension as NSString
