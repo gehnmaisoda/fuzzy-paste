@@ -363,6 +363,17 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // タイプセグメントコントロール
     private let typeSegment = NSSegmentedControl()
 
+    // 編集フォームコンテナ & 未選択プレースホルダー
+    private let editFormContainer = NSView()
+    private let noSelectionLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "スニペットを選択してください")
+        label.font = .systemFont(ofSize: 14)
+        label.textColor = .tertiaryLabelColor
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
     // 画像/ファイルコンテンツ用コンテナ
     private let textContentContainer = NSView()
     private let imageContentContainer = NSView()
@@ -540,31 +551,31 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         panel.addSubview(emptyStateView)
 
         let emptyIcon = NSImageView()
-        emptyIcon.image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: nil)
-        emptyIcon.contentTintColor = NSColor.systemOrange.withAlphaComponent(0.25)
-        emptyIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 32, weight: .light)
+        emptyIcon.image = NSImage(systemSymbolName: "text.badge.plus", accessibilityDescription: nil)
+        emptyIcon.contentTintColor = .tertiaryLabelColor
+        emptyIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .thin)
         emptyIcon.translatesAutoresizingMaskIntoConstraints = false
         emptyStateView.addSubview(emptyIcon)
 
-        let emptyTitle = NSTextField(labelWithString: "スニペットはまだありません")
-        emptyTitle.font = .systemFont(ofSize: Layout.subtitleFontSize, weight: .light)
-        emptyTitle.textColor = .tertiaryLabelColor
+        let emptyTitle = NSTextField(labelWithString: "スニペットがありません")
+        emptyTitle.font = .systemFont(ofSize: 13, weight: .medium)
+        emptyTitle.textColor = .secondaryLabelColor
         emptyTitle.alignment = .center
         emptyTitle.translatesAutoresizingMaskIntoConstraints = false
         emptyStateView.addSubview(emptyTitle)
 
-        let emptyHint = NSTextField(labelWithString: "＋ ボタンで登録")
-        emptyHint.font = .systemFont(ofSize: Layout.labelFontSize)
+        let emptyHint = NSTextField(labelWithString: "下の + ボタンまたは ⌘N で追加")
+        emptyHint.font = .systemFont(ofSize: 11)
         emptyHint.textColor = .tertiaryLabelColor
         emptyHint.alignment = .center
         emptyHint.translatesAutoresizingMaskIntoConstraints = false
         emptyStateView.addSubview(emptyHint)
 
         NSLayoutConstraint.activate([
-            emptyIcon.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
             emptyIcon.topAnchor.constraint(equalTo: emptyStateView.topAnchor),
+            emptyIcon.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
 
-            emptyTitle.topAnchor.constraint(equalTo: emptyIcon.bottomAnchor, constant: 8),
+            emptyTitle.topAnchor.constraint(equalTo: emptyIcon.bottomAnchor, constant: 10),
             emptyTitle.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
 
             emptyHint.topAnchor.constraint(equalTo: emptyTitle.bottomAnchor, constant: 4),
@@ -614,12 +625,30 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: 右パネル（編集エリア）
 
     private func buildRightPanel(in panel: NSView) {
+        // ── 未選択プレースホルダー ──
+        panel.addSubview(noSelectionLabel)
+        NSLayoutConstraint.activate([
+            noSelectionLabel.centerXAnchor.constraint(equalTo: panel.centerXAnchor),
+            noSelectionLabel.centerYAnchor.constraint(equalTo: panel.centerYAnchor),
+        ])
+
+        // ── 編集フォームコンテナ ──
+        editFormContainer.translatesAutoresizingMaskIntoConstraints = false
+        editFormContainer.isHidden = true
+        panel.addSubview(editFormContainer)
+        NSLayoutConstraint.activate([
+            editFormContainer.topAnchor.constraint(equalTo: panel.topAnchor),
+            editFormContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            editFormContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            editFormContainer.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+        ])
+
         // ── スニペット名 ──
         let titleLabel = makeLabel("スニペット名")
-        panel.addSubview(titleLabel)
+        editFormContainer.addSubview(titleLabel)
 
         let titleWrapper = makeStyledWrapper()
-        panel.addSubview(titleWrapper)
+        editFormContainer.addSubview(titleWrapper)
 
         titleField.font = .systemFont(ofSize: Layout.fieldFontSize)
         titleField.placeholderString = "スニペット名を入力..."
@@ -633,7 +662,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
         // ── タグ ──
         let tagLabel = makeLabel("タグ")
-        panel.addSubview(tagLabel)
+        editFormContainer.addSubview(tagLabel)
 
         tagContainer.onTagsChanged = { [weak self] _ in
             guard let self, !self.isUpdatingFields else { return }
@@ -649,11 +678,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         }
         tagContainer.setContentHuggingPriority(.required, for: .vertical)
         tagContainer.setContentCompressionResistancePriority(.required, for: .vertical)
-        panel.addSubview(tagContainer)
+        editFormContainer.addSubview(tagContainer)
 
         // ── タイプ ──
         let typeLabel = makeLabel("タイプ")
-        panel.addSubview(typeLabel)
+        editFormContainer.addSubview(typeLabel)
 
         typeSegment.segmentCount = 3
         typeSegment.setLabel("テキスト", forSegment: 0)
@@ -669,15 +698,15 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         typeSegment.action = #selector(typeSegmentChanged)
         typeSegment.isEnabled = false
         typeSegment.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(typeSegment)
+        editFormContainer.addSubview(typeSegment)
 
         // ── 内容ラベル ──
         let contentLabel = makeLabel("内容")
-        panel.addSubview(contentLabel)
+        editFormContainer.addSubview(contentLabel)
 
         // ── テキストコンテンツコンテナ ──
         textContentContainer.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(textContentContainer)
+        editFormContainer.addSubview(textContentContainer)
 
         let contentWrapper = makeStyledWrapper()
         contentWrapper.layer?.masksToBounds = true
@@ -719,7 +748,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         // ── 画像コンテンツコンテナ ──
         imageContentContainer.translatesAutoresizingMaskIntoConstraints = false
         imageContentContainer.isHidden = true
-        panel.addSubview(imageContentContainer)
+        editFormContainer.addSubview(imageContentContainer)
 
         let imageWrapper = makeStyledWrapper()
         imageContentContainer.addSubview(imageWrapper)
@@ -743,7 +772,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         // ── ファイルコンテンツコンテナ ──
         fileContentContainer.translatesAutoresizingMaskIntoConstraints = false
         fileContentContainer.isHidden = true
-        panel.addSubview(fileContentContainer)
+        editFormContainer.addSubview(fileContentContainer)
 
         let fileWrapper = makeStyledWrapper()
         fileContentContainer.addSubview(fileWrapper)
@@ -765,13 +794,14 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         }
         fileContentContainer.addSubview(fileDropZone)
 
+        let form = editFormContainer
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: panel.topAnchor),
-            titleLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            titleLabel.topAnchor.constraint(equalTo: form.topAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: form.leadingAnchor),
 
             titleWrapper.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: Layout.spacing),
-            titleWrapper.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-            titleWrapper.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            titleWrapper.leadingAnchor.constraint(equalTo: form.leadingAnchor),
+            titleWrapper.trailingAnchor.constraint(equalTo: form.trailingAnchor),
             titleWrapper.heightAnchor.constraint(equalToConstant: Layout.fieldWrapperHeight),
 
             titleField.leadingAnchor.constraint(equalTo: titleWrapper.leadingAnchor, constant: Layout.inputPadding),
@@ -779,27 +809,27 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             titleField.centerYAnchor.constraint(equalTo: titleWrapper.centerYAnchor),
 
             tagLabel.topAnchor.constraint(equalTo: titleWrapper.bottomAnchor, constant: Layout.sectionSpacing),
-            tagLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            tagLabel.leadingAnchor.constraint(equalTo: form.leadingAnchor),
 
             tagContainer.topAnchor.constraint(equalTo: tagLabel.bottomAnchor, constant: Layout.spacing),
-            tagContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-            tagContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            tagContainer.leadingAnchor.constraint(equalTo: form.leadingAnchor),
+            tagContainer.trailingAnchor.constraint(equalTo: form.trailingAnchor),
 
             typeLabel.topAnchor.constraint(equalTo: tagContainer.bottomAnchor, constant: Layout.sectionSpacing),
-            typeLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            typeLabel.leadingAnchor.constraint(equalTo: form.leadingAnchor),
 
             typeSegment.topAnchor.constraint(equalTo: typeLabel.bottomAnchor, constant: Layout.spacing),
-            typeSegment.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            typeSegment.leadingAnchor.constraint(equalTo: form.leadingAnchor),
             typeSegment.widthAnchor.constraint(equalToConstant: Layout.typeSegmentWidth),
 
             contentLabel.topAnchor.constraint(equalTo: typeSegment.bottomAnchor, constant: Layout.sectionSpacing),
-            contentLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            contentLabel.leadingAnchor.constraint(equalTo: form.leadingAnchor),
 
             // テキストコンテンツコンテナ
             textContentContainer.topAnchor.constraint(equalTo: contentLabel.bottomAnchor, constant: Layout.spacing),
-            textContentContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-            textContentContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
-            textContentContainer.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+            textContentContainer.leadingAnchor.constraint(equalTo: form.leadingAnchor),
+            textContentContainer.trailingAnchor.constraint(equalTo: form.trailingAnchor),
+            textContentContainer.bottomAnchor.constraint(equalTo: form.bottomAnchor),
 
             contentWrapper.topAnchor.constraint(equalTo: textContentContainer.topAnchor),
             contentWrapper.leadingAnchor.constraint(equalTo: textContentContainer.leadingAnchor),
@@ -816,9 +846,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
             // 画像コンテンツコンテナ
             imageContentContainer.topAnchor.constraint(equalTo: contentLabel.bottomAnchor, constant: Layout.spacing),
-            imageContentContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-            imageContentContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
-            imageContentContainer.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+            imageContentContainer.leadingAnchor.constraint(equalTo: form.leadingAnchor),
+            imageContentContainer.trailingAnchor.constraint(equalTo: form.trailingAnchor),
+            imageContentContainer.bottomAnchor.constraint(equalTo: form.bottomAnchor),
 
             imageWrapper.topAnchor.constraint(equalTo: imageContentContainer.topAnchor),
             imageWrapper.leadingAnchor.constraint(equalTo: imageContentContainer.leadingAnchor),
@@ -842,9 +872,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
             // ファイルコンテンツコンテナ
             fileContentContainer.topAnchor.constraint(equalTo: contentLabel.bottomAnchor, constant: Layout.spacing),
-            fileContentContainer.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-            fileContentContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
-            fileContentContainer.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+            fileContentContainer.leadingAnchor.constraint(equalTo: form.leadingAnchor),
+            fileContentContainer.trailingAnchor.constraint(equalTo: form.trailingAnchor),
+            fileContentContainer.bottomAnchor.constraint(equalTo: form.bottomAnchor),
 
             fileWrapper.topAnchor.constraint(equalTo: fileContentContainer.topAnchor),
             fileWrapper.leadingAnchor.constraint(equalTo: fileContentContainer.leadingAnchor),
@@ -1133,6 +1163,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         isUpdatingFields = true
         tagContainer.allKnownTags = store.allTags
         if row >= 0 && row < store.items.count {
+            editFormContainer.isHidden = false
+            noSelectionLabel.isHidden = true
             let item = store.items[row]
             titleField.stringValue = item.title
             tagContainer.tags = item.tags
@@ -1166,17 +1198,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
                 fileInfoLabel.stringValue = "\(meta.originalFileName)\n\(meta.fileExtension.uppercased())  \(formatFileSize(meta.fileSizeBytes))"
             }
         } else {
-            titleField.stringValue = ""
-            tagContainer.tags = []
-            contentTextView.string = ""
-            titleField.isEnabled = false
-            contentTextView.isEditable = false
-            contentTextView.isSelectable = false
+            editFormContainer.isHidden = true
+            noSelectionLabel.isHidden = store.items.isEmpty
             removeButton.isEnabled = false
-            typeSegment.isEnabled = false
-            typeSegment.selectedSegment = 0
-            contentPlaceholder.isHidden = true
-            showContentContainer(.text)
         }
         isUpdatingFields = false
     }
@@ -1203,7 +1227,12 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     }
 
     private func updateEmptyState() {
-        emptyStateView.isHidden = !store.items.isEmpty
+        let empty = store.items.isEmpty
+        emptyStateView.isHidden = !empty
+        // 空状態のとき右パネルのプレースホルダーも隠す
+        if empty {
+            noSelectionLabel.isHidden = true
+        }
     }
 
     // MARK: - NSTextFieldDelegate
