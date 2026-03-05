@@ -435,9 +435,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             actions = [
                 ("⏎", "ペースト"),
                 ("⌘\u{2009}C", "コピー"),
-                ("⌘\u{2009}Click", "複数選択"),
-                ("⇧\u{2009}Space", "プレビュー"),
                 ("⌘\u{2009}E", "スニペット管理"),
+                ("⇧\u{2009}Space", "プレビュー"),
+                ("⌘\u{2009}Click", "複数選択"),
             ]
         }
         if suggestedTag != nil {
@@ -529,7 +529,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         isDragging = false
         isDismissing = false
         filteredItems = FuzzyMatcher.filterMixed(query: "", clips: clips, snippets: snippets)
-        (tableView as? NonFocusTableView)?.clearHover()
+        tableView.clearHover()
         tableView.reloadData()
         tableView.scrollRowToVisible(0)
         emptyStateView.isHidden = true
@@ -813,7 +813,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let query = searchField.stringValue
         orderedSelection = []
         filteredItems = FuzzyMatcher.filterMixed(query: query, clips: allClips, snippets: allSnippets, tagFilters: activeTagFilters)
-        (tableView as? NonFocusTableView)?.clearHover()
+        tableView.clearHover()
         tableView.reloadData()
 
         let isEmpty = filteredItems.isEmpty
