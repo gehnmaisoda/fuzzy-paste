@@ -603,6 +603,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             layer.add(scaleAnim, forKey: "dismissScale")
         }
 
+        // アニメーション完了前に元アプリをアクティブ化して、
+        // macOS が別ウィンドウ（スニペット管理等）を一瞬前面に出すのを防ぐ
+        app?.activate()
+
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Anim.dismissDuration
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -613,7 +617,6 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             self?.alphaValue = 1
             self?.contentView?.layer?.transform = CATransform3DIdentity
             self?.isDismissing = false
-            app?.activate()
         })
     }
 

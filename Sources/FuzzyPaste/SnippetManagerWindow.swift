@@ -115,9 +115,7 @@ private final class PlaceholderLabel: NSTextField {
 private final class DropZoneView: NSView {
     enum Kind { case image, file }
 
-    private static let iconSize: CGFloat = 28
-    private static let messageFontSize: CGFloat = 12
-    private static let cornerRadius: CGFloat = 8
+    private static let cornerRadius: CGFloat = 12
 
     var onFileSelected: ((URL) -> Void)?
 
@@ -127,7 +125,7 @@ private final class DropZoneView: NSView {
     private let messageLabel = NSTextField(labelWithString: "")
     private let browseButton = NSButton()
     private var isDragOver = false {
-        didSet { updateAppearance() }
+        didSet { updateAppearance(animated: true) }
     }
 
     init(kind: Kind) {
@@ -141,36 +139,42 @@ private final class DropZoneView: NSView {
 
     private func setupUI() {
         wantsLayer = true
+        layer?.cornerRadius = Self.cornerRadius
+        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.03).cgColor
         translatesAutoresizingMaskIntoConstraints = false
 
-        // 破線ボーダー
+        // 破線ボーダー（アクセントカラー）
         dashBorder.fillColor = nil
-        dashBorder.strokeColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
+        dashBorder.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor
         dashBorder.lineWidth = 1.5
         dashBorder.lineDashPattern = [6, 4]
         layer?.addSublayer(dashBorder)
 
         // アイコン
-        let symbolName = kind == .image ? "photo.badge.plus" : "doc.badge.plus"
+        let symbolName = kind == .image ? "photo.on.rectangle.angled" : "arrow.down.doc"
         iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        iconView.contentTintColor = .tertiaryLabelColor
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .light)
+        iconView.contentTintColor = .controlAccentColor.withAlphaComponent(0.4)
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 24, weight: .light)
         iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
 
         // メッセージ
-        let msg = kind == .image ? "ここに画像をドラッグ&ドロップ" : "ここにファイルをドラッグ&ドロップ"
+        let msg = kind == .image
+            ? "画像をドラッグ&ドロップ"
+            : "ファイルをドラッグ&ドロップ"
         messageLabel.stringValue = msg
-        messageLabel.font = .systemFont(ofSize: Self.messageFontSize, weight: .regular)
-        messageLabel.textColor = .tertiaryLabelColor
+        messageLabel.font = .systemFont(ofSize: 12)
+        messageLabel.textColor = .secondaryLabelColor
         messageLabel.alignment = .center
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(messageLabel)
 
-        // 選択ボタン
-        let buttonTitle = kind == .image ? "画像を選択…" : "ファイルを選択…"
+        // 選択ボタン（フラットなピル型）
+        let buttonTitle = kind == .image ? "または選択" : "または選択"
         browseButton.title = buttonTitle
-        browseButton.bezelStyle = .rounded
+        browseButton.isBordered = false
+        browseButton.font = .systemFont(ofSize: 11, weight: .medium)
+        browseButton.contentTintColor = .controlAccentColor
         browseButton.target = self
         browseButton.action = #selector(browseClicked)
         browseButton.translatesAutoresizingMaskIntoConstraints = false
@@ -178,12 +182,12 @@ private final class DropZoneView: NSView {
 
         NSLayoutConstraint.activate([
             iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -28),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -20),
 
             messageLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 8),
             messageLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
 
-            browseButton.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 10),
+            browseButton.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 4),
             browseButton.centerXAnchor.constraint(equalTo: centerXAnchor),
         ])
     }
@@ -194,18 +198,46 @@ private final class DropZoneView: NSView {
 
     override func layout() {
         super.layout()
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: Self.cornerRadius, yRadius: Self.cornerRadius)
-        dashBorder.path = path.cgPath
+        let path = CGPath(roundedRect: bounds.insetBy(dx: 2, dy: 2),
+                          cornerWidth: Self.cornerRadius, cornerHeight: Self.cornerRadius,
+                          transform: nil)
+        dashBorder.path = path
         dashBorder.frame = bounds
     }
 
-    private func updateAppearance() {
+    private func updateAppearance(animated: Bool) {
+        let bgColor: CGColor
+        let strokeColor: CGColor
+        let iconTint: NSColor
+
         if isDragOver {
-            dashBorder.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.7).cgColor
-            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.06).cgColor
+            bgColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+            strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
+            iconTint = .controlAccentColor.withAlphaComponent(0.7)
         } else {
-            dashBorder.strokeColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
-            layer?.backgroundColor = nil
+            bgColor = NSColor.labelColor.withAlphaComponent(0.03).cgColor
+            strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor
+            iconTint = .controlAccentColor.withAlphaComponent(0.4)
+        }
+
+        if animated {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.15
+                ctx.allowsImplicitAnimation = true
+                layer?.backgroundColor = bgColor
+                iconView.contentTintColor = iconTint
+            }
+            // CAShapeLayer の色はアニメーションブロック外で直接変更
+            let anim = CABasicAnimation(keyPath: "strokeColor")
+            anim.fromValue = dashBorder.strokeColor
+            anim.toValue = strokeColor
+            anim.duration = 0.15
+            dashBorder.strokeColor = strokeColor
+            dashBorder.add(anim, forKey: "strokeColor")
+        } else {
+            layer?.backgroundColor = bgColor
+            dashBorder.strokeColor = strokeColor
+            iconView.contentTintColor = iconTint
         }
     }
 
@@ -265,27 +297,6 @@ private final class DropZoneView: NSView {
     }
 }
 
-/// NSBezierPath → CGPath 変換
-private extension NSBezierPath {
-    var cgPath: CGPath {
-        let path = CGMutablePath()
-        var points = [CGPoint](repeating: .zero, count: 3)
-        for i in 0..<elementCount {
-            let type = element(at: i, associatedPoints: &points)
-            switch type {
-            case .moveTo: path.move(to: points[0])
-            case .lineTo: path.addLine(to: points[0])
-            case .curveTo: path.addCurve(to: points[2], control1: points[0], control2: points[1])
-            case .closePath: path.closeSubpath()
-            case .cubicCurveTo: path.addCurve(to: points[2], control1: points[0], control2: points[1])
-            case .quadraticCurveTo: path.addQuadCurve(to: points[1], control: points[0])
-            @unknown default: break
-            }
-        }
-        return path
-    }
-}
-
 /// スニペット管理ウィンドウ。
 /// メニューバーの「スニペット管理...」から開く。
 ///
@@ -305,6 +316,165 @@ private extension NSBezierPath {
 /// │  │ [＋ 追加]  [削除] │      └────────────────────────────────┘  │
 /// │  └──────────────────┘                                          │
 /// └────────────────────────────────────────────────────────────────┘
+
+// MARK: - ピル型セグメントコントロール
+
+/// モダンなピル型タイプ切替コントロール。
+/// 選択中のセグメントにアクセントカラーの背景がスライドアニメーションで移動する。
+@MainActor
+private final class PillSegmentControl: NSView {
+    struct Segment {
+        let icon: String
+        let label: String
+    }
+
+    var selectedSegment: Int = 0 {
+        didSet {
+            if oldValue != selectedSegment { updateSelection(animated: true) }
+        }
+    }
+    var isEnabled: Bool = true {
+        didSet { alphaValue = isEnabled ? 1.0 : 0.5 }
+    }
+    var target: AnyObject?
+    var action: Selector?
+
+    private let segments: [Segment]
+    private var labels: [NSTextField] = []
+    private var icons: [NSImageView] = []
+    private let sliderLayer = CALayer()
+    private static let inset: CGFloat = 3
+
+    init(segments: [Segment]) {
+        self.segments = segments
+        super.init(frame: .zero)
+        setup()
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
+
+        // スライダー（CALayer で直接制御、anchorPoint を左下に設定）
+        sliderLayer.anchorPoint = .zero
+        sliderLayer.cornerRadius = 8
+        sliderLayer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+        layer?.addSublayer(sliderLayer)
+
+        // ラベル群を均等配置する NSStackView
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = 0
+        stack.distribution = .fillEqually
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        for seg in segments {
+            // 各セグメントのコンテナ
+            let container = NSView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+
+            let iconView = NSImageView()
+            iconView.image = NSImage(systemSymbolName: seg.icon, accessibilityDescription: nil)
+            iconView.imageScaling = .scaleProportionallyDown
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(iconView)
+
+            let lbl = NSTextField(labelWithString: seg.label)
+            lbl.font = .systemFont(ofSize: 11, weight: .medium)
+            lbl.alignment = .center
+            lbl.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(lbl)
+
+            NSLayoutConstraint.activate([
+                iconView.widthAnchor.constraint(equalToConstant: 12),
+                iconView.heightAnchor.constraint(equalToConstant: 12),
+                iconView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                iconView.trailingAnchor.constraint(equalTo: lbl.leadingAnchor, constant: -3),
+
+                lbl.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                lbl.centerXAnchor.constraint(equalTo: container.centerXAnchor, constant: 8),
+            ])
+
+            icons.append(iconView)
+            labels.append(lbl)
+            stack.addArrangedSubview(container)
+        }
+
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            heightAnchor.constraint(equalToConstant: 30),
+        ])
+    }
+
+    override func layout() {
+        super.layout()
+        updateSliderPosition(animated: false)
+        updateColors()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        let loc = convert(event.locationInWindow, from: nil)
+        let segWidth = bounds.width / CGFloat(segments.count)
+        let index = max(0, min(Int(loc.x / segWidth), segments.count - 1))
+        guard index != selectedSegment else { return }
+        selectedSegment = index
+        _ = target?.perform(action, with: self)
+    }
+
+    private func updateSelection(animated: Bool) {
+        updateSliderPosition(animated: animated)
+        updateColors()
+    }
+
+    private func updateSliderPosition(animated: Bool) {
+        guard bounds.width > 0 else { return }
+        let segWidth = bounds.width / CGFloat(segments.count)
+        let inset = Self.inset
+        let sliderWidth = segWidth - inset * 2
+        let sliderHeight = bounds.height - inset * 2
+        let newX = CGFloat(selectedSegment) * segWidth + inset
+
+        // サイズは即座に設定
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        sliderLayer.bounds = CGRect(x: 0, y: 0, width: sliderWidth, height: sliderHeight)
+        CATransaction.commit()
+
+        // 位置（anchorPoint=0,0 基準）をアニメーション
+        let newPosition = CGPoint(x: newX, y: inset)
+        if animated {
+            let anim = CABasicAnimation(keyPath: "position")
+            anim.fromValue = sliderLayer.position
+            anim.toValue = newPosition
+            anim.duration = 0.2
+            anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            sliderLayer.position = newPosition
+            sliderLayer.add(anim, forKey: "slide")
+        } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            sliderLayer.position = newPosition
+            CATransaction.commit()
+        }
+    }
+
+    private func updateColors() {
+        for (i, lbl) in labels.enumerated() {
+            let color: NSColor = i == selectedSegment ? .controlAccentColor : .secondaryLabelColor
+            lbl.textColor = color
+            icons[i].contentTintColor = color
+        }
+    }
+}
+
 @MainActor
 final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate, NSTextViewDelegate {
 
@@ -365,7 +535,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private let actionButton = NSButton(frame: .zero)
 
     // タイプセグメントコントロール
-    private let typeSegment = NSSegmentedControl()
+    private let typeSegment = PillSegmentControl(segments: [
+        .init(icon: "text.alignleft", label: "テキスト"),
+        .init(icon: "photo", label: "画像"),
+        .init(icon: "doc", label: "ファイル"),
+    ])
 
     // 編集フォームコンテナ & 未選択プレースホルダー
     private let editFormContainer = NSView()
@@ -378,7 +552,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private let imagePreviewView = NSImageView()
     private let imageInfoLabel = NSTextField(labelWithString: "")
     private let fileIconView = NSImageView()
+    private let fileNameLabel = NSTextField(labelWithString: "")
     private let fileInfoLabel = NSTextField(labelWithString: "")
+    private let fileCardView = NSView()
 
     // ドロップゾーン（画像/ファイル選択用）
     private let imageDropZone = DropZoneView(kind: .image)
@@ -389,6 +565,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private let store: SnippetStore
     private let imageStore: ImageStore
     private let fileStore: FileStore
+    private var hasBeenShown = false
     /// フィールド更新中のフラグ。変更通知の再帰を防ぐ。
     private var isUpdatingFields = false
 
@@ -407,6 +584,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         titlebarAppearsTransparent = true
         titleVisibility = .hidden
         isReleasedWhenClosed = false
+        collectionBehavior = [.moveToActiveSpace]
         isOpaque = false
         backgroundColor = .clear
         minSize = NSSize(width: 600, height: 380)
@@ -686,16 +864,6 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         let typeLabel = makeLabel("タイプ")
         editFormContainer.addSubview(typeLabel)
 
-        typeSegment.segmentCount = 3
-        typeSegment.setLabel("テキスト", forSegment: 0)
-        typeSegment.setLabel("画像", forSegment: 1)
-        typeSegment.setLabel("ファイル", forSegment: 2)
-        typeSegment.setImage(NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil), forSegment: 0)
-        typeSegment.setImage(NSImage(systemSymbolName: "photo", accessibilityDescription: nil), forSegment: 1)
-        typeSegment.setImage(NSImage(systemSymbolName: "doc", accessibilityDescription: nil), forSegment: 2)
-        typeSegment.segmentStyle = .rounded
-        typeSegment.segmentDistribution = .fillEqually
-        typeSegment.controlSize = .large
         typeSegment.target = self
         typeSegment.action = #selector(typeSegmentChanged)
         typeSegment.isEnabled = false
@@ -781,16 +949,28 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         let fileWrapper = makeStyledWrapper()
         fileContentContainer.addSubview(fileWrapper)
 
+        // カード型ファイルプレビュー（アイコン + ファイル名 + メタ情報を横並び）
+        fileCardView.wantsLayer = true
+        fileCardView.layer?.cornerRadius = 10
+        fileCardView.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
+        fileCardView.translatesAutoresizingMaskIntoConstraints = false
+        fileWrapper.addSubview(fileCardView)
+
         fileIconView.imageScaling = .scaleProportionallyUpOrDown
         fileIconView.translatesAutoresizingMaskIntoConstraints = false
-        fileWrapper.addSubview(fileIconView)
+        fileCardView.addSubview(fileIconView)
 
-        fileInfoLabel.font = .systemFont(ofSize: Layout.cellPreviewFontSize)
+        fileNameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        fileNameLabel.textColor = .labelColor
+        fileNameLabel.lineBreakMode = .byTruncatingTail
+        fileNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        fileCardView.addSubview(fileNameLabel)
+
+        fileInfoLabel.font = .systemFont(ofSize: 11)
         fileInfoLabel.textColor = .secondaryLabelColor
         fileInfoLabel.lineBreakMode = .byTruncatingTail
-        fileInfoLabel.maximumNumberOfLines = 3
         fileInfoLabel.translatesAutoresizingMaskIntoConstraints = false
-        fileWrapper.addSubview(fileInfoLabel)
+        fileCardView.addSubview(fileInfoLabel)
 
         // ドロップゾーン（ファイル）
         fileDropZone.onFileSelected = { [weak self] url in
@@ -885,14 +1065,23 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             fileWrapper.trailingAnchor.constraint(equalTo: fileContentContainer.trailingAnchor),
             fileWrapper.bottomAnchor.constraint(equalTo: fileContentContainer.bottomAnchor),
 
-            fileIconView.topAnchor.constraint(equalTo: fileWrapper.topAnchor, constant: Layout.padding),
-            fileIconView.centerXAnchor.constraint(equalTo: fileWrapper.centerXAnchor),
-            fileIconView.widthAnchor.constraint(equalToConstant: 64),
-            fileIconView.heightAnchor.constraint(equalToConstant: 64),
+            fileCardView.topAnchor.constraint(equalTo: fileWrapper.topAnchor, constant: Layout.inputPadding),
+            fileCardView.leadingAnchor.constraint(equalTo: fileWrapper.leadingAnchor, constant: Layout.inputPadding),
+            fileCardView.trailingAnchor.constraint(equalTo: fileWrapper.trailingAnchor, constant: -Layout.inputPadding),
+            fileCardView.heightAnchor.constraint(equalToConstant: 56),
 
-            fileInfoLabel.topAnchor.constraint(equalTo: fileIconView.bottomAnchor, constant: Layout.spacing * 2),
-            fileInfoLabel.leadingAnchor.constraint(equalTo: fileWrapper.leadingAnchor, constant: Layout.inputPadding),
-            fileInfoLabel.trailingAnchor.constraint(equalTo: fileWrapper.trailingAnchor, constant: -Layout.inputPadding),
+            fileIconView.leadingAnchor.constraint(equalTo: fileCardView.leadingAnchor, constant: 12),
+            fileIconView.centerYAnchor.constraint(equalTo: fileCardView.centerYAnchor),
+            fileIconView.widthAnchor.constraint(equalToConstant: 32),
+            fileIconView.heightAnchor.constraint(equalToConstant: 32),
+
+            fileNameLabel.leadingAnchor.constraint(equalTo: fileIconView.trailingAnchor, constant: 10),
+            fileNameLabel.trailingAnchor.constraint(equalTo: fileCardView.trailingAnchor, constant: -12),
+            fileNameLabel.bottomAnchor.constraint(equalTo: fileCardView.centerYAnchor, constant: -1),
+
+            fileInfoLabel.leadingAnchor.constraint(equalTo: fileNameLabel.leadingAnchor),
+            fileInfoLabel.trailingAnchor.constraint(equalTo: fileNameLabel.trailingAnchor),
+            fileInfoLabel.topAnchor.constraint(equalTo: fileCardView.centerYAnchor, constant: 1),
 
             // ファイルドロップゾーン
             fileDropZone.topAnchor.constraint(equalTo: fileContentContainer.topAnchor),
@@ -973,13 +1162,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         case .fileDropZone:
             fileContentContainer.isHidden = false
             fileDropZone.isHidden = false
-            fileIconView.isHidden = true
-            fileInfoLabel.isHidden = true
+            fileCardView.isHidden = true
         case .filePreview:
             fileContentContainer.isHidden = false
             fileDropZone.isHidden = true
-            fileIconView.isHidden = false
-            fileInfoLabel.isHidden = false
+            fileCardView.isHidden = false
         }
     }
 
@@ -993,9 +1180,10 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         updateEditFields()
         updateEmptyState()
 
-        if let screen = NSScreen.main {
-            let sf = screen.visibleFrame
-            setFrameOrigin(NSPoint(x: sf.midX - frame.width / 2, y: sf.midY - frame.height / 2))
+        // 初回のみ画面中央に配置。以降はユーザーが移動した位置を維持。
+        if !hasBeenShown {
+            center()
+            hasBeenShown = true
         }
 
         makeKeyAndOrderFront(nil)
@@ -1214,7 +1402,10 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
                 contentTextView.isEditable = false
                 contentTextView.isSelectable = false
                 fileIconView.image = fileStore.icon(for: meta)
-                fileInfoLabel.stringValue = "\(meta.originalFileName)\n\(meta.fileExtension.uppercased())  \(formatFileSize(meta.fileSizeBytes))"
+                fileNameLabel.stringValue = meta.originalFileName
+                let ext = meta.fileExtension.uppercased()
+                let size = formatFileSize(meta.fileSizeBytes)
+                fileInfoLabel.stringValue = ext.isEmpty ? size : "\(ext) · \(size)"
             }
         } else {
             editFormContainer.isHidden = true
@@ -1409,12 +1600,16 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         let originalFileName = url.lastPathComponent
         let item = store.items[row]
 
-        switch type {
-        case .image:
+        // ファイルタイプでも画像ファイルなら自動的に画像として処理
+        let isImage = type == .image
+            || (UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false)
+
+        if isImage {
             let utType = UTType(filenameExtension: url.pathExtension)?.identifier ?? "public.image"
             guard let metadata = imageStore.save(data: data, utType: utType, originalFileName: originalFileName) else { return }
             store.update(id: item.id, title: item.title, content: .image(metadata), tags: item.tags)
-        case .file:
+            typeSegment.selectedSegment = 1
+        } else {
             guard let metadata = fileStore.save(data: data, originalFileName: originalFileName) else { return }
             store.update(id: item.id, title: item.title, content: .file(metadata), tags: item.tags)
         }
