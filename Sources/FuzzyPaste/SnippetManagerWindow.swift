@@ -1382,16 +1382,51 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     @objc private func importClicked() {
         let openPanel = NSOpenPanel()
-        openPanel.allowedContentTypes = [.json]
+        openPanel.allowedContentTypes = [.json, .zip]
         openPanel.canChooseFiles = true
         openPanel.canChooseDirectories = false
         openPanel.allowsMultipleSelection = false
-        openPanel.message = "インポートする JSON ファイルを選択してください"
+        openPanel.message = "インポートするファイルを選択してください（.zip または .json）"
 
         guard openPanel.runModal() == .OK, let url = openPanel.url else { return }
 
         do {
-            let result = try store.parseImportFile(url: url)
+            let ext = url.pathExtension.lowercased()
+            let isBundle = ext == "zip" || ext == "fuzzypaste"
+
+            // バンドルの場合は展開して snippets.json を取得
+            let jsonData: Data
+            var bundleTempDir: URL?
+
+            if isBundle {
+                let tempDir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("FuzzyPaste-import-\(UUID().uuidString)")
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                bundleTempDir = tempDir
+
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                proc.arguments = ["-x", "-k", url.path, tempDir.path]
+                try proc.run()
+                proc.waitUntilExit()
+                guard proc.terminationStatus == 0 else {
+                    throw NSError(domain: "FuzzyPaste", code: 1,
+                                  userInfo: [NSLocalizedDescriptionKey: "ZIP ファイルの展開に失敗しました"])
+                }
+
+                let jsonURL = tempDir.appendingPathComponent("snippets.json")
+                guard FileManager.default.fileExists(atPath: jsonURL.path) else {
+                    throw NSError(domain: "FuzzyPaste", code: 2,
+                                  userInfo: [NSLocalizedDescriptionKey: "バンドル内に snippets.json が見つかりません"])
+                }
+                jsonData = try Data(contentsOf: jsonURL)
+            } else {
+                jsonData = try Data(contentsOf: url)
+            }
+
+            defer { if let dir = bundleTempDir { try? FileManager.default.removeItem(at: dir) } }
+
+            let result = try store.parseImportData(jsonData)
             let total = result.new.count + result.duplicates.count
 
             let alert = NSAlert()
@@ -1416,7 +1451,36 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
             guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-            store.importItems(result.new)
+            if let tempDir = bundleTempDir {
+                // バンドルから画像・ファイルをインポートし、ファイル名マッピングを作成
+                var fileNameMapping: [String: String] = [:]
+                let bundleImagesDir = tempDir.appendingPathComponent("images")
+                let bundleFilesDir = tempDir.appendingPathComponent("files")
+
+                for item in result.new {
+                    switch item.content {
+                    case .image(let meta):
+                        let sourceURL = bundleImagesDir.appendingPathComponent(meta.fileName)
+                        if FileManager.default.fileExists(atPath: sourceURL.path),
+                           let newName = imageStore.importImage(from: sourceURL) {
+                            fileNameMapping[meta.fileName] = newName
+                        }
+                    case .file(let meta):
+                        let sourceURL = bundleFilesDir.appendingPathComponent(meta.fileName)
+                        if FileManager.default.fileExists(atPath: sourceURL.path),
+                           let newName = fileStore.importFile(from: sourceURL, fileExtension: meta.fileExtension) {
+                            fileNameMapping[meta.fileName] = newName
+                        }
+                    case .text:
+                        break
+                    }
+                }
+
+                store.importItems(result.new, fileNameMapping: fileNameMapping)
+            } else {
+                store.importItems(result.new)
+            }
+
             tableView.reloadData()
             if !store.items.isEmpty {
                 tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
@@ -1443,15 +1507,32 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             return
         }
 
+        let hasMediaSnippets = store.items.contains {
+            switch $0.content {
+            case .image, .file: return true
+            case .text: return false
+            }
+        }
+
         let savePanel = NSSavePanel()
-        savePanel.allowedContentTypes = [.json]
-        savePanel.nameFieldStringValue = "snippets.json"
-        savePanel.message = "スニペットのエクスポート先を選択してください"
+        if hasMediaSnippets {
+            savePanel.allowedContentTypes = [.zip]
+            savePanel.nameFieldStringValue = "snippets.zip"
+            savePanel.message = "スニペットをバンドル（ZIP）でエクスポートします"
+        } else {
+            savePanel.allowedContentTypes = [.json]
+            savePanel.nameFieldStringValue = "snippets.json"
+            savePanel.message = "スニペットのエクスポート先を選択してください"
+        }
 
         guard savePanel.runModal() == .OK, let url = savePanel.url else { return }
 
         do {
-            try store.exportToFile(url: url)
+            if hasMediaSnippets {
+                try exportBundle(to: url)
+            } else {
+                try store.exportToFile(url: url)
+            }
         } catch {
             let alert = NSAlert()
             alert.alertStyle = .critical
@@ -1459,6 +1540,53 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             alert.informativeText = error.localizedDescription
             alert.addButton(withTitle: "OK")
             alert.runModal()
+        }
+    }
+
+    /// JSON + 画像/ファイルを ZIP バンドルにまとめてエクスポートする。
+    private func exportBundle(to url: URL) throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FuzzyPaste-export-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // snippets.json を書き出し
+        let jsonData = try store.exportData()
+        try jsonData.write(to: tempDir.appendingPathComponent("snippets.json"), options: .atomic)
+
+        // 画像・ファイルの実体をコピー
+        let fm = FileManager.default
+        let bundleImagesDir = tempDir.appendingPathComponent("images")
+        let bundleFilesDir = tempDir.appendingPathComponent("files")
+        try? fm.createDirectory(at: bundleImagesDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: bundleFilesDir, withIntermediateDirectories: true)
+
+        for item in store.items {
+            switch item.content {
+            case .image(let meta):
+                let src = imageStore.imageURL(for: meta.fileName)
+                if fm.fileExists(atPath: src.path) {
+                    try fm.copyItem(at: src, to: bundleImagesDir.appendingPathComponent(meta.fileName))
+                }
+            case .file(let meta):
+                let src = fileStore.fileURL(for: meta.fileName)
+                if fm.fileExists(atPath: src.path) {
+                    try fm.copyItem(at: src, to: bundleFilesDir.appendingPathComponent(meta.fileName))
+                }
+            case .text:
+                break
+            }
+        }
+
+        // ditto で ZIP 作成
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        proc.arguments = ["-c", "-k", "--sequesterRsrc", tempDir.path, url.path]
+        try proc.run()
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else {
+            throw NSError(domain: "FuzzyPaste", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "ZIP ファイルの作成に失敗しました"])
         }
     }
 

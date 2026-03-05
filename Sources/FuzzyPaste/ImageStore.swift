@@ -72,6 +72,21 @@ final class ImageStore {
         imagesDir.appendingPathComponent(fileName)
     }
 
+    /// 外部ファイルを新しい UUID ファイル名でインポートし、サムネイルも生成する。
+    /// 成功時は新しいファイル名を返す。
+    func importImage(from sourceURL: URL) -> String? {
+        guard let data = try? Data(contentsOf: sourceURL) else { return nil }
+        let newFileName = "\(UUID().uuidString).png"
+        let destURL = imagesDir.appendingPathComponent(newFileName)
+        do {
+            try data.write(to: destURL, options: .atomic)
+        } catch {
+            return nil
+        }
+        generateThumbnail(fileName: newFileName, sourceData: data)
+        return newFileName
+    }
+
     /// 画像ファイルとサムネイルを削除する。
     func delete(fileName: String) {
         let fileURL = imagesDir.appendingPathComponent(fileName)
