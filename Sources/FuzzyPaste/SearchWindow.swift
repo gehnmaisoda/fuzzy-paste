@@ -413,7 +413,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             emptyLabel.bottomAnchor.constraint(equalTo: emptyStateView.bottomAnchor),
         ])
 
-        // ウェルカムビュー（履歴もスニペットもゼロの初回表示用）
+        // ウェルカムビュー（クリップ履歴ゼロ時の初回ガイド用）
         welcomeView.translatesAutoresizingMaskIntoConstraints = false
         welcomeView.isHidden = true
         container.addSubview(welcomeView)
