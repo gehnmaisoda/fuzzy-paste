@@ -97,7 +97,11 @@ public final class SnippetStore {
     public init() {
         let dir = AppPaths.appSupportDir
         fileURL = dir.appendingPathComponent("snippets.json")
+        let isFirstLaunch = !FileManager.default.fileExists(atPath: fileURL.path)
         load()
+        if isFirstLaunch && items.isEmpty {
+            seedDefaults()
+        }
     }
 
     /// 画像ファイル削除用コールバック。AppDelegate が設定する。
@@ -230,6 +234,17 @@ public final class SnippetStore {
 
     /// 監視対象の JSON ファイルパスを返す。
     public var monitoredFileURL: URL { fileURL }
+
+    private func seedDefaults() {
+        items = [
+            SnippetItem(
+                title: "メール返信テンプレート",
+                content: .text("{{相手の名前}}様\n\nお世話になっております。\nよろしくお願いいたします。"),
+                tags: ["first snippet", "mail"]
+            ),
+        ]
+        save()
+    }
 
     private func load() { reload() }
 

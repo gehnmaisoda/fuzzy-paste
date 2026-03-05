@@ -191,6 +191,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private var searchIcon: NSImageView!
 
     private let emptyStateView = NSView()
+    private let welcomeView = NSView()
 
     private var allClips: [ClipItem] = []
     private var allSnippets: [SnippetItem] = []
@@ -411,6 +412,48 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             emptyLabel.centerXAnchor.constraint(equalTo: emptyStateView.centerXAnchor),
             emptyLabel.bottomAnchor.constraint(equalTo: emptyStateView.bottomAnchor),
         ])
+
+        // ウェルカムビュー（履歴もスニペットもゼロの初回表示用）
+        welcomeView.translatesAutoresizingMaskIntoConstraints = false
+        welcomeView.isHidden = true
+        container.addSubview(welcomeView)
+
+        let welcomeIcon = NSImageView()
+        welcomeIcon.image = NSImage(systemSymbolName: "clipboard.fill", accessibilityDescription: nil)
+        welcomeIcon.contentTintColor = .controlAccentColor
+        welcomeIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 32, weight: .light)
+        welcomeIcon.translatesAutoresizingMaskIntoConstraints = false
+        welcomeView.addSubview(welcomeIcon)
+
+        let welcomeTitle = NSTextField(labelWithString: "ようこそ FuzzyPaste へ")
+        welcomeTitle.font = .systemFont(ofSize: layout.cellFontSize + 2, weight: .semibold)
+        welcomeTitle.textColor = .labelColor
+        welcomeTitle.alignment = .center
+        welcomeTitle.translatesAutoresizingMaskIntoConstraints = false
+        welcomeView.addSubview(welcomeTitle)
+
+        let welcomeSub = NSTextField(labelWithString: "テキストやファイルをコピーすると、ここからすぐ呼び出せます")
+        welcomeSub.font = .systemFont(ofSize: layout.cellFontSize - 1)
+        welcomeSub.textColor = .secondaryLabelColor
+        welcomeSub.alignment = .center
+        welcomeSub.translatesAutoresizingMaskIntoConstraints = false
+        welcomeView.addSubview(welcomeSub)
+
+        NSLayoutConstraint.activate([
+            welcomeView.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            welcomeView.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            welcomeView.widthAnchor.constraint(lessThanOrEqualTo: scrollView.widthAnchor, constant: -40),
+
+            welcomeIcon.centerXAnchor.constraint(equalTo: welcomeView.centerXAnchor),
+            welcomeIcon.topAnchor.constraint(equalTo: welcomeView.topAnchor),
+
+            welcomeTitle.topAnchor.constraint(equalTo: welcomeIcon.bottomAnchor, constant: 10),
+            welcomeTitle.centerXAnchor.constraint(equalTo: welcomeView.centerXAnchor),
+
+            welcomeSub.topAnchor.constraint(equalTo: welcomeTitle.bottomAnchor, constant: 4),
+            welcomeSub.centerXAnchor.constraint(equalTo: welcomeView.centerXAnchor),
+            welcomeSub.bottomAnchor.constraint(equalTo: welcomeView.bottomAnchor),
+        ])
     }
 
     private func setupHintBar(in container: NSView) {
@@ -554,8 +597,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         tableView.clearHover()
         tableView.reloadData()
         tableView.scrollRowToVisible(0)
+        let showWelcome = filteredItems.isEmpty && clips.isEmpty
         emptyStateView.isHidden = true
-        scrollView.isHidden = false
+        welcomeView.isHidden = !showWelcome
+        scrollView.isHidden = showWelcome
         updateHintLabel()
 
         positionNearCursor()
@@ -842,7 +887,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         tableView.reloadData()
 
         let isEmpty = filteredItems.isEmpty
-        emptyStateView.isHidden = !isEmpty
+        let isWelcome = isEmpty && allClips.isEmpty && searchField.stringValue.isEmpty && activeTagFilters.isEmpty
+        welcomeView.isHidden = !isWelcome
+        emptyStateView.isHidden = isWelcome || !isEmpty
         scrollView.isHidden = isEmpty
 
         if !isEmpty {
