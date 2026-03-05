@@ -23,7 +23,7 @@ public struct SnippetItem: Codable, Identifiable, Sendable {
         self.createdAt = createdAt
     }
 
-    /// コンテンツが空でないかどうか。テキストは空文字列、画像/ファイルは未設定を空とみなす。
+    /// コンテンツが実質的に空でないかどうか。空白のみのテキストは空とみなす。
     public var hasContent: Bool {
         switch content {
         case .text(let s): return !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

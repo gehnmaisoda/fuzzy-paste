@@ -365,14 +365,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     // 編集フォームコンテナ & 未選択プレースホルダー
     private let editFormContainer = NSView()
-    private let noSelectionLabel: NSTextField = {
-        let label = NSTextField(labelWithString: "スニペットを選択してください")
-        label.font = .systemFont(ofSize: 14)
-        label.textColor = .tertiaryLabelColor
-        label.alignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
+    private let noSelectionLabel = NSTextField(labelWithString: "")
 
     // 画像/ファイルコンテンツ用コンテナ
     private let textContentContainer = NSView()
@@ -558,14 +551,14 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         emptyStateView.addSubview(emptyIcon)
 
         let emptyTitle = NSTextField(labelWithString: "スニペットがありません")
-        emptyTitle.font = .systemFont(ofSize: 13, weight: .medium)
+        emptyTitle.font = .systemFont(ofSize: Layout.fieldFontSize, weight: .medium)
         emptyTitle.textColor = .secondaryLabelColor
         emptyTitle.alignment = .center
         emptyTitle.translatesAutoresizingMaskIntoConstraints = false
         emptyStateView.addSubview(emptyTitle)
 
         let emptyHint = NSTextField(labelWithString: "下の + ボタンまたは ⌘N で追加")
-        emptyHint.font = .systemFont(ofSize: 11)
+        emptyHint.font = .systemFont(ofSize: Layout.labelFontSize)
         emptyHint.textColor = .tertiaryLabelColor
         emptyHint.alignment = .center
         emptyHint.translatesAutoresizingMaskIntoConstraints = false
@@ -626,6 +619,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     private func buildRightPanel(in panel: NSView) {
         // ── 未選択プレースホルダー ──
+        noSelectionLabel.stringValue = "スニペットを選択してください"
+        noSelectionLabel.font = .systemFont(ofSize: Layout.subtitleFontSize)
+        noSelectionLabel.textColor = .tertiaryLabelColor
+        noSelectionLabel.alignment = .center
+        noSelectionLabel.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(noSelectionLabel)
         NSLayoutConstraint.activate([
             noSelectionLabel.centerXAnchor.constraint(equalTo: panel.centerXAnchor),
