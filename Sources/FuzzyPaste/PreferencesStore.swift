@@ -233,7 +233,8 @@ final class PreferencesStore: ObservableObject {
         save()
     }
 
-    private func load() {
+    /// JSON ファイルから設定を読み込み直す。
+    func reload() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -246,11 +247,20 @@ final class PreferencesStore: ObservableObject {
         }
     }
 
+    /// 監視対象の JSON ファイルパスを返す。
+    var monitoredFileURL: URL { fileURL }
+
+    private func load() { reload() }
+
     private func save() {
         let prefs = Preferences(excludedApps: excludedApps, windowSizePreset: windowSizePreset, maxHistoryCount: maxHistoryCount, hotkeyConfig: hotkeyConfig, hasCompletedOnboarding: hasCompletedOnboarding)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(prefs) else { return }
         try? data.write(to: fileURL, options: .atomic)
+        lastSaveDate = Date()
     }
+
+    /// 自分自身の save による変更を無視するためのタイムスタンプ。
+    private(set) var lastSaveDate: Date = .distantPast
 }

@@ -5,7 +5,7 @@ BUILD_DIR = .build/release
 APP_BUNDLE = $(APP_NAME).app
 DEV_FLAGS = -Xswiftc -DDEV
 
-.PHONY: run relaunch relaunch_release hard_reset clean
+.PHONY: run relaunch relaunch_release hard_reset clean seed
 
 define make_bundle
 	rm -rf $(APP_BUNDLE)
@@ -35,6 +35,10 @@ hard_reset:
 	tccutil reset Accessibility $(BUNDLE_ID)
 	rm -rf ~/Library/Application\ Support/FuzzyPaste-Dev
 	@echo "Hard reset complete"
+
+seed:
+	swift build $(DEV_FLAGS)
+	./scripts/seed.sh
 
 clean:
 	swift package clean

@@ -219,17 +219,28 @@ public final class SnippetStore {
         }
     }
 
-    private func load() {
+    /// JSON ファイルからスニペットを読み込み直す。
+    /// 外部プロセス（CLI 等）による変更を反映するために公開している。
+    public func reload() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         items = (try? decoder.decode([SnippetItem].self, from: data)) ?? []
     }
 
+    /// 監視対象の JSON ファイルパスを返す。
+    public var monitoredFileURL: URL { fileURL }
+
+    private func load() { reload() }
+
     private func save() {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(items) else { return }
         try? data.write(to: fileURL, options: .atomic)
+        lastSaveDate = Date()
     }
+
+    /// 自分自身の save による変更を無視するためのタイムスタンプ。
+    public private(set) var lastSaveDate: Date = .distantPast
 }

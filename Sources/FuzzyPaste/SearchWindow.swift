@@ -9,24 +9,29 @@ private final class ModernRowView: NSTableRowView {
     private static let selectionInsetH: CGFloat = 6
     private static let hoverAlpha: CGFloat = 0.07
     private static let selectionAlpha: CGFloat = 0.15
+    private static let separatorInset: CGFloat = 16
 
     var isHovered = false {
         didSet { if oldValue != isHovered { needsDisplay = true } }
     }
 
+    /// 最終行の場合 true。セパレーターを描画しない。
+    var isLastRow = false
+
     override func drawSelection(in dirtyRect: NSRect) {
-        guard isSelected else { return }
-        let insetRect = bounds.insetBy(dx: Self.selectionInsetH, dy: 1)
-        let path = NSBezierPath(roundedRect: insetRect,
-                                xRadius: Self.selectionRadius,
-                                yRadius: Self.selectionRadius)
-        NSColor.controlAccentColor.withAlphaComponent(Self.selectionAlpha).setFill()
-        path.fill()
+        // selectionHighlightStyle = .none のため呼ばれないが念のため空にする
     }
 
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
-        if isHovered && !isSelected {
+        if isSelected {
+            let insetRect = bounds.insetBy(dx: Self.selectionInsetH, dy: 1)
+            let path = NSBezierPath(roundedRect: insetRect,
+                                    xRadius: Self.selectionRadius,
+                                    yRadius: Self.selectionRadius)
+            NSColor.controlAccentColor.withAlphaComponent(Self.selectionAlpha).setFill()
+            path.fill()
+        } else if isHovered {
             let insetRect = bounds.insetBy(dx: Self.selectionInsetH, dy: 1)
             let path = NSBezierPath(roundedRect: insetRect,
                                     xRadius: Self.selectionRadius,
@@ -34,7 +39,19 @@ private final class ModernRowView: NSTableRowView {
             NSColor.labelColor.withAlphaComponent(Self.hoverAlpha).setFill()
             path.fill()
         }
+
+        // ピクセル境界にスナップしたセパレーターを描画
+        guard !isLastRow else { return }
+        let scale = window?.backingScaleFactor ?? 2.0
+        let lineHeight = 1.0 / scale
+        let rawY = bounds.maxY - lineHeight
+        let snappedY = round(rawY * scale) / scale
+        NSColor.separatorColor.withAlphaComponent(0.4).setFill()
+        NSRect(x: Self.separatorInset, y: snappedY,
+               width: bounds.width - Self.separatorInset * 2, height: lineHeight).fill()
     }
+
+    override func drawSeparator(in dirtyRect: NSRect) {}
 }
 
 // MARK: - フォーカスを受け取らない NSTableView
@@ -153,7 +170,6 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private static let imageCellID = NSUserInterfaceItemIdentifier("ImageClipCell")
     private static let fileCellID = NSUserInterfaceItemIdentifier("FileClipCell")
 
-    private static let timestampTag = 500
     private static let imageTitleTag = 100
     private static let imageSubtitleTag = 101
     private static let fileTitleTag = 300
@@ -340,8 +356,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         tableView.delegate = self
         tableView.rowHeight = layout.rowHeight
         tableView.backgroundColor = .clear
-        tableView.intercellSpacing = NSSize(width: 0, height: 1)
-        tableView.selectionHighlightStyle = .regular
+        tableView.intercellSpacing = NSSize(width: 0, height: 0)
+        tableView.selectionHighlightStyle = .none
         tableView.allowsMultipleSelection = true
         tableView.doubleAction = #selector(tableDoubleClicked)
         tableView.target = self
@@ -932,6 +948,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         } else {
             orderedSelection = []
         }
+        // selectionHighlightStyle = .none では行ビューの再描画が自動で走らないため手動で促す
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            rowView.needsDisplay = true
+        }
         updateSelectionBadges()
         updateHintLabel()
     }
@@ -959,12 +979,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let id = NSUserInterfaceItemIdentifier("ModernRow")
+        let rowView: ModernRowView
         if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? ModernRowView {
             existing.isHovered = false
-            return existing
+            rowView = existing
+        } else {
+            rowView = ModernRowView()
+            rowView.identifier = id
         }
-        let rowView = ModernRowView()
-        rowView.identifier = id
+        rowView.isLastRow = (row == filteredItems.count - 1)
         return rowView
     }
 
@@ -995,11 +1018,11 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             case .text(let text):
                 cellView = makeTextCell(tableView: tableView, text: text
                     .components(separatedBy: .newlines)
-                    .joined(separator: " "), date: clipItem.copiedAt)
+                    .joined(separator: " "))
             case .image(let meta):
-                cellView = makeImageCell(tableView: tableView, meta: meta, date: clipItem.copiedAt)
+                cellView = makeImageCell(tableView: tableView, meta: meta)
             case .file(let meta):
-                cellView = makeFileCell(tableView: tableView, meta: meta, date: clipItem.copiedAt)
+                cellView = makeFileCell(tableView: tableView, meta: meta)
             }
         case .snippet(let snippetItem):
             switch snippetItem.content {
@@ -1018,13 +1041,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     // MARK: - Cell factories
 
     /// テキストアイテム用セル
-    private func makeTextCell(tableView: NSTableView, text: String, date: Date) -> NSTableCellView {
+    private func makeTextCell(tableView: NSTableView, text: String) -> NSTableCellView {
         let id = Self.textCellID
         if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView {
             existing.textField?.stringValue = text
-            if let ts = existing.viewWithTag(Self.timestampTag) as? NSTextField {
-                ts.stringValue = relativeTimeString(from: date)
-            }
             return existing
         }
 
@@ -1040,33 +1060,18 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         view.addSubview(tf)
         view.textField = tf
 
-        // タイムスタンプ
-        let ts = NSTextField(labelWithString: relativeTimeString(from: date))
-        ts.tag = Self.timestampTag
-        ts.font = .systemFont(ofSize: layout.cellFontSize - 2)
-        ts.textColor = .tertiaryLabelColor
-        ts.alignment = .right
-        ts.setContentHuggingPriority(.required, for: .horizontal)
-        ts.setContentCompressionResistancePriority(.required, for: .horizontal)
-        ts.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(ts)
-
         NSLayoutConstraint.activate([
             tf.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: layout.cellPadding),
-            tf.trailingAnchor.constraint(equalTo: ts.leadingAnchor, constant: -8),
+            tf.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -layout.cellPadding),
             tf.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-
-            ts.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -layout.cellPadding),
-            ts.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            ts.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
         ])
         return view
     }
 
     /// 画像アイテム用セル（2行レイアウト）:
-    /// [thumb]  filename.png       5m ← 上段: 太字ファイル名 + タイムスタンプ
-    ///          1920×1080  2.3 MB     ← 下段: メタデータ
-    private func makeImageCell(tableView: NSTableView, meta: ImageMetadata, date: Date) -> NSView {
+    /// filename.png              [thumb] ← 上段: 太字ファイル名、右端にサムネ
+    /// 1920×1080  2.3 MB                 ← 下段: メタデータ
+    private func makeImageCell(tableView: NSTableView, meta: ImageMetadata) -> NSView {
         let id = Self.imageCellID
         let titleTag = Self.imageTitleTag
         let subtitleTag = Self.imageSubtitleTag
@@ -1074,18 +1079,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let thumbView: NSImageView
         let titleLabel: NSTextField
         let subtitleLabel: NSTextField
-        let timeLabel: NSTextField
         let cellView: NSTableCellView
 
         if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView,
            let existingThumb = existing.imageView,
            let existingTitle = existing.viewWithTag(titleTag) as? NSTextField,
-           let existingSub = existing.viewWithTag(subtitleTag) as? NSTextField,
-           let existingTime = existing.viewWithTag(Self.timestampTag) as? NSTextField {
+           let existingSub = existing.viewWithTag(subtitleTag) as? NSTextField {
             thumbView = existingThumb
             titleLabel = existingTitle
             subtitleLabel = existingSub
-            timeLabel = existingTime
             cellView = existing
         } else {
             cellView = NSTableCellView()
@@ -1109,16 +1111,6 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             titleLabel.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(titleLabel)
 
-            timeLabel = NSTextField(labelWithString: "")
-            timeLabel.tag = Self.timestampTag
-            timeLabel.font = .systemFont(ofSize: layout.cellFontSize - 2)
-            timeLabel.textColor = .tertiaryLabelColor
-            timeLabel.alignment = .right
-            timeLabel.setContentHuggingPriority(.required, for: .horizontal)
-            timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-            timeLabel.translatesAutoresizingMaskIntoConstraints = false
-            cellView.addSubview(timeLabel)
-
             subtitleLabel = NSTextField(labelWithString: "")
             subtitleLabel.tag = subtitleTag
             subtitleLabel.lineBreakMode = .byTruncatingTail
@@ -1129,38 +1121,27 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(subtitleLabel)
 
-            let textLeading = thumbView.trailingAnchor.anchorWithOffset(to: titleLabel.leadingAnchor)
             NSLayoutConstraint.activate([
-                thumbView.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
+                // サムネを右端に配置
+                thumbView.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
                 thumbView.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
                 thumbView.widthAnchor.constraint(equalToConstant: layout.thumbSize),
                 thumbView.heightAnchor.constraint(equalToConstant: layout.thumbSize),
 
-                textLeading.constraint(equalToConstant: 8),
-                titleLabel.trailingAnchor.constraint(equalTo: timeLabel.leadingAnchor, constant: -8),
+                titleLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
+                titleLabel.trailingAnchor.constraint(equalTo: thumbView.leadingAnchor, constant: -8),
                 titleLabel.bottomAnchor.constraint(equalTo: cellView.centerYAnchor, constant: -1),
 
-                timeLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
-                timeLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-                timeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
-
                 subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-                subtitleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
+                subtitleLabel.trailingAnchor.constraint(equalTo: thumbView.leadingAnchor, constant: -8),
                 subtitleLabel.topAnchor.constraint(equalTo: cellView.centerYAnchor, constant: 1),
             ])
         }
 
-        // サムネイル設定
         thumbView.isHidden = false
         thumbView.image = imageStore?.thumbnail(for: meta.fileName)
-
-        // 上段: ファイル名（なければ空文字）
         titleLabel.stringValue = meta.originalFileName ?? ""
 
-        // タイムスタンプ
-        timeLabel.stringValue = relativeTimeString(from: date)
-
-        // 下段: メタデータ
         let sizeStr = formatFileSize(meta.fileSizeBytes)
         subtitleLabel.stringValue = "\(meta.pixelWidth)×\(meta.pixelHeight)  \(sizeStr)"
 
@@ -1168,9 +1149,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     /// ファイルアイテム用セル（2行レイアウト）:
-    /// [icon]  filename.pdf       5m <- 上段: 太字ファイル名 + タイムスタンプ
-    ///         pdf  1.2 MB           <- 下段: 拡張子 + サイズ
-    private func makeFileCell(tableView: NSTableView, meta: FileMetadata, date: Date) -> NSView {
+    /// filename.pdf              [icon] ← 上段: 太字ファイル名、右端にアイコン
+    /// PDF  1.2 MB                      ← 下段: 拡張子 + サイズ
+    private func makeFileCell(tableView: NSTableView, meta: FileMetadata) -> NSView {
         let id = Self.fileCellID
         let titleTag = Self.fileTitleTag
         let subtitleTag = Self.fileSubtitleTag
@@ -1178,18 +1159,15 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let iconView: NSImageView
         let titleLabel: NSTextField
         let subtitleLabel: NSTextField
-        let timeLabel: NSTextField
         let cellView: NSTableCellView
 
         if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView,
            let existingIcon = existing.imageView,
            let existingTitle = existing.viewWithTag(titleTag) as? NSTextField,
-           let existingSub = existing.viewWithTag(subtitleTag) as? NSTextField,
-           let existingTime = existing.viewWithTag(Self.timestampTag) as? NSTextField {
+           let existingSub = existing.viewWithTag(subtitleTag) as? NSTextField {
             iconView = existingIcon
             titleLabel = existingTitle
             subtitleLabel = existingSub
-            timeLabel = existingTime
             cellView = existing
         } else {
             cellView = NSTableCellView()
@@ -1210,16 +1188,6 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             titleLabel.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(titleLabel)
 
-            timeLabel = NSTextField(labelWithString: "")
-            timeLabel.tag = Self.timestampTag
-            timeLabel.font = .systemFont(ofSize: layout.cellFontSize - 2)
-            timeLabel.textColor = .tertiaryLabelColor
-            timeLabel.alignment = .right
-            timeLabel.setContentHuggingPriority(.required, for: .horizontal)
-            timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-            timeLabel.translatesAutoresizingMaskIntoConstraints = false
-            cellView.addSubview(timeLabel)
-
             subtitleLabel = NSTextField(labelWithString: "")
             subtitleLabel.tag = subtitleTag
             subtitleLabel.lineBreakMode = .byTruncatingTail
@@ -1230,38 +1198,28 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(subtitleLabel)
 
-            let textLeading = iconView.trailingAnchor.anchorWithOffset(to: titleLabel.leadingAnchor)
+            let iconSize = layout.thumbSize * 0.5
             NSLayoutConstraint.activate([
-                iconView.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
+                // アイコンを右端に配置
+                iconView.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
                 iconView.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
-                iconView.widthAnchor.constraint(equalToConstant: layout.thumbSize * 0.5),
-                iconView.heightAnchor.constraint(equalToConstant: layout.thumbSize * 0.5),
+                iconView.widthAnchor.constraint(equalToConstant: iconSize),
+                iconView.heightAnchor.constraint(equalToConstant: iconSize),
 
-                textLeading.constraint(equalToConstant: 8),
-                titleLabel.trailingAnchor.constraint(equalTo: timeLabel.leadingAnchor, constant: -8),
+                titleLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
+                titleLabel.trailingAnchor.constraint(equalTo: iconView.leadingAnchor, constant: -8),
                 titleLabel.bottomAnchor.constraint(equalTo: cellView.centerYAnchor, constant: -1),
 
-                timeLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
-                timeLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-                timeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
-
                 subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-                subtitleLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
+                subtitleLabel.trailingAnchor.constraint(equalTo: iconView.leadingAnchor, constant: -8),
                 subtitleLabel.topAnchor.constraint(equalTo: cellView.centerYAnchor, constant: 1),
             ])
         }
 
-        // アイコン設定
         iconView.isHidden = false
         iconView.image = fileStore?.icon(for: meta)
-
-        // 上段: ファイル名
         titleLabel.stringValue = meta.originalFileName
 
-        // タイムスタンプ
-        timeLabel.stringValue = relativeTimeString(from: date)
-
-        // 下段: 拡張子 + サイズ
         let sizeStr = formatFileSize(meta.fileSizeBytes)
         if meta.fileExtension.isEmpty {
             subtitleLabel.stringValue = sizeStr
@@ -1274,7 +1232,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     /// スニペット画像セル: makeImageCell を再利用し、タイトルをスニペット名に差し替え
     private func makeSnippetImageCell(tableView: NSTableView, snippet: SnippetItem, meta: ImageMetadata) -> NSView {
-        let cell = makeImageCell(tableView: tableView, meta: meta, date: snippet.createdAt)
+        let cell = makeImageCell(tableView: tableView, meta: meta)
         if let titleLabel = cell.viewWithTag(Self.imageTitleTag) as? NSTextField {
             titleLabel.attributedStringValue = snippetTitleString(snippet)
         }
@@ -1283,7 +1241,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
     /// スニペットファイルセル: makeFileCell を再利用し、タイトルをスニペット名に差し替え
     private func makeSnippetFileCell(tableView: NSTableView, snippet: SnippetItem, meta: FileMetadata) -> NSView {
-        let cell = makeFileCell(tableView: tableView, meta: meta, date: snippet.createdAt)
+        let cell = makeFileCell(tableView: tableView, meta: meta)
         if let titleLabel = cell.viewWithTag(Self.fileTitleTag) as? NSTextField {
             titleLabel.attributedStringValue = snippetTitleString(snippet)
         }
@@ -1321,16 +1279,13 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
         let topLabel: NSTextField
         let bottomLabel: NSTextField
-        let timeLabel: NSTextField
         let cellView: NSView
 
         if let existing = tableView.makeView(withIdentifier: id, owner: nil),
            let existingTop = existing.viewWithTag(topTag) as? NSTextField,
-           let existingBottom = existing.viewWithTag(bottomTag) as? NSTextField,
-           let existingTime = existing.viewWithTag(Self.timestampTag) as? NSTextField {
+           let existingBottom = existing.viewWithTag(bottomTag) as? NSTextField {
             topLabel = existingTop
             bottomLabel = existingBottom
-            timeLabel = existingTime
             cellView = existing
         } else {
             cellView = NSView()
@@ -1343,16 +1298,6 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             topLabel.drawsBackground = false
             topLabel.translatesAutoresizingMaskIntoConstraints = false
             cellView.addSubview(topLabel)
-
-            timeLabel = NSTextField(labelWithString: "")
-            timeLabel.tag = Self.timestampTag
-            timeLabel.font = .systemFont(ofSize: layout.cellFontSize - 2)
-            timeLabel.textColor = .tertiaryLabelColor
-            timeLabel.alignment = .right
-            timeLabel.setContentHuggingPriority(.required, for: .horizontal)
-            timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-            timeLabel.translatesAutoresizingMaskIntoConstraints = false
-            cellView.addSubview(timeLabel)
 
             bottomLabel = NSTextField(labelWithString: "")
             bottomLabel.tag = bottomTag
@@ -1367,11 +1312,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             NSLayoutConstraint.activate([
                 topLabel.topAnchor.constraint(equalTo: cellView.topAnchor, constant: 8),
                 topLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding),
-                topLabel.trailingAnchor.constraint(equalTo: timeLabel.leadingAnchor, constant: -8),
-
-                timeLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
-                timeLabel.centerYAnchor.constraint(equalTo: topLabel.centerYAnchor),
-                timeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
+                topLabel.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
 
                 bottomLabel.topAnchor.constraint(equalTo: topLabel.bottomAnchor, constant: 2),
                 bottomLabel.leadingAnchor.constraint(equalTo: cellView.leadingAnchor, constant: layout.cellPadding + 12),
@@ -1379,11 +1320,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             ])
         }
 
-        // 上段: ★ タイトル + タグバッジ
         topLabel.attributedStringValue = snippetTitleString(snippet)
-
-        // タイムスタンプ
-        timeLabel.stringValue = relativeTimeString(from: snippet.createdAt)
 
         // 下段: 内容プレビュー
         let preview: String
@@ -1767,15 +1704,6 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             NSLog("FuzzyPaste: dragFileURL copy failed: \(error)")
             return sourceURL
         }
-    }
-
-    /// 相対時間を短い文字列にフォーマット。
-    private func relativeTimeString(from date: Date) -> String {
-        let seconds = max(0, Int(-date.timeIntervalSinceNow))
-        if seconds < 60 { return "now" }
-        if seconds < 3600 { return "\(seconds / 60)m" }
-        if seconds < 86400 { return "\(seconds / 3600)h" }
-        return "\(seconds / 86400)d"
     }
 
     /// ファイルサイズを人間が読みやすい形式にフォーマット。

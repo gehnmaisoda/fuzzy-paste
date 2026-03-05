@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingWindow: OnboardingWindow?
     private var dynamicSnippetWindow: DynamicSnippetWindow?
     private var cancellables: Set<AnyCancellable> = []
+    private var fileWatchTimer: Timer?
+    private var lastKnownModDates: [String: Date] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
@@ -32,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeWindowSizePreset()
         observeMaxHistoryCount()
         observeHotkeyConfig()
+        startFileWatchers()
     }
 
     // MARK: - ストア初期化
@@ -309,6 +312,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuShowPreferences() {
         showPreferences()
+    }
+
+    // MARK: - ファイル変更監視
+
+    /// JSON ファイルの変更を定期チェックし、外部プロセス（CLI 等）による変更を自動リロードする。
+    /// ファイルの更新日時を比較し、自分の save 以外の変更のみリロードする。
+    private func startFileWatchers() {
+        fileWatchTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            Task { @MainActor [weak self] in
+                self?.checkFileChanges()
+            }
+        }
+    }
+
+    private func checkFileChanges() {
+        let fm = FileManager.default
+        let targets: [(url: URL, lastSave: Date, reload: () -> Void)] = [
+            (historyStore.monitoredFileURL, historyStore.lastSaveDate, { [weak self] in self?.historyStore.reload() }),
+            (snippetStore.monitoredFileURL, snippetStore.lastSaveDate, { [weak self] in self?.snippetStore.reload() }),
+            (preferencesStore.monitoredFileURL, preferencesStore.lastSaveDate, { [weak self] in self?.preferencesStore.reload() }),
+        ]
+
+        for target in targets {
+            let key = target.url.lastPathComponent
+            guard let attrs = try? fm.attributesOfItem(atPath: target.url.path),
+                  let modDate = attrs[.modificationDate] as? Date else { continue }
+            let lastKnown = lastKnownModDates[key] ?? .distantPast
+            if modDate > lastKnown {
+                lastKnownModDates[key] = modDate
+                // 自分の save による変更は無視
+                if Date().timeIntervalSince(target.lastSave) > 1 {
+                    target.reload()
+                }
+            }
+        }
     }
 
     // MARK: - メニューバー
