@@ -3,14 +3,15 @@ CLI_NAME = fpaste
 BUNDLE_ID = com.gehnmaisoda.FuzzyPaste
 BUILD_DIR = .build/release
 APP_BUNDLE = $(APP_NAME).app
+DEV_FLAGS = -Xswiftc -DDEV
 
 .PHONY: build run clean bundle relaunch hard_reset install
 
 build:
-	swift build
+	swift build $(DEV_FLAGS)
 
 release:
-	swift build -c release
+	swift build -c release $(DEV_FLAGS)
 
 run: build
 	.build/debug/$(APP_NAME)

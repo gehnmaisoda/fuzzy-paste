@@ -13,10 +13,7 @@ let package = Package(
     targets: [
         .target(
             name: "FuzzyPasteCore",
-            path: "Sources/FuzzyPasteCore",
-            swiftSettings: [
-                .define("DEV", .when(configuration: .debug))
-            ]
+            path: "Sources/FuzzyPasteCore"
         ),
         .executableTarget(
             name: "FuzzyPaste",
