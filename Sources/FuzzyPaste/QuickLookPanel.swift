@@ -21,6 +21,11 @@ final class QuickLookPanel: NSPanel {
         static let arrowHeight: CGFloat = 20
         static let cornerRadius: CGFloat = 12
         static let gap: CGFloat = 4
+        // ポップアップアニメーション
+        static let showDuration: CFTimeInterval = 0.18
+        static let dismissDuration: CFTimeInterval = 0.12
+        static let showScale: CGFloat = 0.85
+        static let dismissScale: CGFloat = 0.88
     }
 
     private let visualEffect = NSVisualEffectView()
@@ -261,18 +266,26 @@ final class QuickLookPanel: NSPanel {
             alphaValue = 0
             orderFront(nil)
 
+            // 矢印位置を起点にスケールアニメーション
+            if let layer = contentView?.layer {
+                let origin = arrowOriginInLayer(layer)
+                let fromTransform = Self.scaleTransform(around: origin, scale: Layout.showScale)
+
+                layer.transform = fromTransform
+                let anim = CABasicAnimation(keyPath: "transform")
+                anim.fromValue = fromTransform
+                anim.toValue = CATransform3DIdentity
+                anim.duration = Layout.showDuration
+                anim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                anim.isRemovedOnCompletion = true
+                layer.transform = CATransform3DIdentity
+                layer.add(anim, forKey: "popup")
+            }
+
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.18
+                ctx.duration = Layout.showDuration
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 self.animator().alphaValue = 1
-            }
-            if let layer = contentView?.layer {
-                let anim = CABasicAnimation(keyPath: "transform.scale")
-                anim.fromValue = 0.92
-                anim.toValue = 1.0
-                anim.duration = 0.18
-                anim.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                layer.add(anim, forKey: "popup")
             }
         } else {
             alphaValue = 1
@@ -294,11 +307,15 @@ final class QuickLookPanel: NSPanel {
 
     /// ポップアウトアニメーション付きで閉じる。
     func dismissAnimated() {
+        // 矢印位置を起点にスケールダウン
         if let layer = contentView?.layer {
-            let anim = CABasicAnimation(keyPath: "transform.scale")
-            anim.fromValue = 1.0
-            anim.toValue = 0.92
-            anim.duration = 0.12
+            let origin = arrowOriginInLayer(layer)
+            let toTransform = Self.scaleTransform(around: origin, scale: Layout.dismissScale)
+
+            let anim = CABasicAnimation(keyPath: "transform")
+            anim.fromValue = CATransform3DIdentity
+            anim.toValue = toTransform
+            anim.duration = Layout.dismissDuration
             anim.timingFunction = CAMediaTimingFunction(name: .easeIn)
             anim.fillMode = .forwards
             anim.isRemovedOnCompletion = false
@@ -306,14 +323,35 @@ final class QuickLookPanel: NSPanel {
         }
 
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.12
+            ctx.duration = Layout.dismissDuration
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             self.animator().alphaValue = 0
         }, completionHandler: {
             self.orderOut(nil)
             self.alphaValue = 1
             self.contentView?.layer?.removeAllAnimations()
+            self.contentView?.layer?.transform = CATransform3DIdentity
         })
+    }
+
+    /// 矢印の位置をレイヤー座標系での起点として返す。
+    private func arrowOriginInLayer(_ layer: CALayer) -> CGPoint {
+        let bounds = layer.bounds
+        // 矢印側を起点にする: 左に矢印があれば x=0、右なら x=bounds.width
+        let x: CGFloat = arrowOnLeft ? 0 : bounds.width
+        // arrowCenterY はパネル内での矢印の Y 位置（下原点）
+        let y = arrowCenterY
+        return CGPoint(x: x, y: y)
+    }
+
+    /// 指定した起点を中心にスケールする CATransform3D を生成。
+    /// Note: SearchWindow にも同一の実装あり（ファイル間依存を避けるため各クラスに配置）。
+    private static func scaleTransform(around origin: CGPoint, scale: CGFloat) -> CATransform3D {
+        var t = CATransform3DIdentity
+        t = CATransform3DTranslate(t, origin.x, origin.y, 0)
+        t = CATransform3DScale(t, scale, scale, 1)
+        t = CATransform3DTranslate(t, -origin.x, -origin.y, 0)
+        return t
     }
 
     // MARK: - Layout calculation

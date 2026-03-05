@@ -139,8 +139,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private enum Anim {
         static let showDuration: CFTimeInterval = 0.15
         static let dismissDuration: CFTimeInterval = 0.1
-        static let showScale: CGFloat = 0.96
-        static let dismissScale: CGFloat = 0.98
+        static let showScale: CGFloat = 0.90
+        static let dismissScale: CGFloat = 0.95
     }
 
     /// レイアウト定数。プリセットにより値が変わる。
@@ -540,26 +540,33 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
 
         // アニメーション初期状態
         alphaValue = 0
-        contentView?.layer?.setAffineTransform(CGAffineTransform(scaleX: Anim.showScale, y: Anim.showScale))
 
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         makeFirstResponder(searchField)
 
-        // フェードイン + スケールアニメーション
+        // カーソル位置を起点にスケールアニメーション
+        if let layer = contentView?.layer {
+            let origin = cursorOriginInLayer(layer)
+            let fromTransform = Self.scaleTransform(around: origin, scale: Anim.showScale)
+
+            layer.transform = fromTransform
+            let anim = CABasicAnimation(keyPath: "transform")
+            anim.fromValue = fromTransform
+            anim.toValue = CATransform3DIdentity
+            anim.duration = Anim.showDuration
+            anim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            anim.isRemovedOnCompletion = true
+            layer.transform = CATransform3DIdentity
+            layer.add(anim, forKey: "showScale")
+        }
+
+        // フェードイン
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = Anim.showDuration
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             self.animator().alphaValue = 1
         }
-        let scaleAnim = CABasicAnimation(keyPath: "transform.scale")
-        scaleAnim.fromValue = Anim.showScale
-        scaleAnim.toValue = 1.0
-        scaleAnim.duration = Anim.showDuration
-        scaleAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        scaleAnim.isRemovedOnCompletion = true
-        contentView?.layer?.setAffineTransform(.identity)
-        contentView?.layer?.add(scaleAnim, forKey: "showScale")
 
         // 先頭のアイテムを自動選択
         if !filteredItems.isEmpty {
@@ -575,15 +582,20 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         let app = previousApp
         previousApp = nil
 
-        // スケールダウン + フェードアウト
-        let scaleAnim = CABasicAnimation(keyPath: "transform.scale")
-        scaleAnim.fromValue = 1.0
-        scaleAnim.toValue = Anim.dismissScale
-        scaleAnim.duration = Anim.dismissDuration
-        scaleAnim.timingFunction = CAMediaTimingFunction(name: .easeIn)
-        scaleAnim.fillMode = .forwards
-        scaleAnim.isRemovedOnCompletion = false
-        contentView?.layer?.add(scaleAnim, forKey: "dismissScale")
+        // カーソル位置を起点にスケールダウン + フェードアウト
+        if let layer = contentView?.layer {
+            let origin = cursorOriginInLayer(layer)
+            let toTransform = Self.scaleTransform(around: origin, scale: Anim.dismissScale)
+
+            let scaleAnim = CABasicAnimation(keyPath: "transform")
+            scaleAnim.fromValue = CATransform3DIdentity
+            scaleAnim.toValue = toTransform
+            scaleAnim.duration = Anim.dismissDuration
+            scaleAnim.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            scaleAnim.fillMode = .forwards
+            scaleAnim.isRemovedOnCompletion = false
+            layer.add(scaleAnim, forKey: "dismissScale")
+        }
 
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Anim.dismissDuration
@@ -593,7 +605,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             self?.contentView?.layer?.removeAnimation(forKey: "dismissScale")
             self?.orderOut(nil)
             self?.alphaValue = 1
-            self?.contentView?.layer?.setAffineTransform(.identity)
+            self?.contentView?.layer?.transform = CATransform3DIdentity
             self?.isDismissing = false
             app?.activate()
         })
@@ -617,6 +629,30 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         y = (y - windowSize.height).clamped(to: screenFrame.minY...(screenFrame.maxY - windowSize.height))
 
         setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    /// カーソル位置をレイヤー座標系での起点として返す。
+    private func cursorOriginInLayer(_ layer: CALayer) -> CGPoint {
+        let mouseLocation = NSEvent.mouseLocation
+        let windowFrame = frame
+        let bounds = layer.bounds
+
+        // カーソル位置をレイヤー内の座標に変換
+        let relX = ((mouseLocation.x - windowFrame.minX) / windowFrame.width).clamped(to: 0...1)
+        let relY = ((mouseLocation.y - windowFrame.minY) / windowFrame.height).clamped(to: 0...1)
+
+        return CGPoint(x: relX * bounds.width, y: relY * bounds.height)
+    }
+
+    /// 指定した起点を中心にスケールする CATransform3D を生成。
+    /// translate → scale → translate で anchorPoint を変えずに実現。
+    /// Note: QuickLookPanel にも同一の実装あり（ファイル間依存を避けるため各クラスに配置）。
+    private static func scaleTransform(around origin: CGPoint, scale: CGFloat) -> CATransform3D {
+        var t = CATransform3DIdentity
+        t = CATransform3DTranslate(t, origin.x, origin.y, 0)
+        t = CATransform3DScale(t, scale, scale, 1)
+        t = CATransform3DTranslate(t, -origin.x, -origin.y, 0)
+        return t
     }
 
     // MARK: - Window lifecycle
