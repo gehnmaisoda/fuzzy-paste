@@ -566,6 +566,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private let fileInfoLabel = NSTextField(labelWithString: "")
     private let fileCardView = NSView()
     private let fileClearButton = NSButton()
+    private let fileCsvTableView = CSVTableView()
 
     // ドロップゾーン（画像/ファイル選択用）
     private let imageDropZone = DropZoneView(kind: .image)
@@ -1002,6 +1003,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         configureToolbarButton(fileClearButton, symbol: "trash", toolTip: "ファイルを削除", action: #selector(clearFileContent))
         fileCardView.addSubview(fileClearButton)
 
+        // CSV プレビューテーブル
+        fileCsvTableView.translatesAutoresizingMaskIntoConstraints = false
+        fileCsvTableView.isHidden = true
+        fileWrapper.addSubview(fileCsvTableView)
+
         // ドロップゾーン（ファイル）
         fileDropZone.onFileSelected = { [weak self] url in
             self?.handleDroppedFile(url, forType: .file)
@@ -1132,6 +1138,12 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             fileClearButton.widthAnchor.constraint(equalToConstant: Layout.clearButtonSize),
             fileClearButton.heightAnchor.constraint(equalToConstant: Layout.clearButtonSize),
 
+            // CSV プレビューテーブル
+            fileCsvTableView.topAnchor.constraint(equalTo: fileCardView.bottomAnchor, constant: 8),
+            fileCsvTableView.leadingAnchor.constraint(equalTo: fileWrapper.leadingAnchor, constant: Layout.inputPadding),
+            fileCsvTableView.trailingAnchor.constraint(equalTo: fileWrapper.trailingAnchor, constant: -Layout.inputPadding),
+            fileCsvTableView.bottomAnchor.constraint(equalTo: fileWrapper.bottomAnchor, constant: -Layout.inputPadding),
+
             // ファイルドロップゾーン
             fileDropZone.topAnchor.constraint(equalTo: fileContentContainer.topAnchor),
             fileDropZone.leadingAnchor.constraint(equalTo: fileContentContainer.leadingAnchor),
@@ -1194,6 +1206,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         textContentContainer.isHidden = true
         imageContentContainer.isHidden = true
         fileContentContainer.isHidden = true
+        fileCsvTableView.isHidden = true
 
         switch display {
         case .text:
@@ -1455,6 +1468,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
                 let ext = meta.fileExtension.uppercased()
                 let size = formatFileSize(meta.fileSizeBytes)
                 fileInfoLabel.stringValue = ext.isEmpty ? size : "\(ext) · \(size)"
+                updateCsvPreview(for: meta)
             }
         } else {
             editFormContainer.isHidden = true
@@ -1626,6 +1640,18 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     @objc private func clearImageContent() { confirmAndClearContent(label: "画像") }
     @objc private func clearFileContent() { confirmAndClearContent(label: "ファイル") }
+
+    /// ファイルが CSV なら CSV テーブルを表示する。
+    private func updateCsvPreview(for meta: FileMetadata) {
+        if CSVParser.fileExtensions.contains(meta.fileExtension.lowercased()),
+           let text = try? String(contentsOf: fileStore.fileURL(for: meta.fileName), encoding: .utf8),
+           let result = CSVParser.parseIfCSV(text) {
+            fileCsvTableView.setCSV(result)
+            fileCsvTableView.isHidden = false
+        } else {
+            fileCsvTableView.isHidden = true
+        }
+    }
 
     /// 確認ダイアログを出してからコンテンツをクリアする共通処理
     private func confirmAndClearContent(label: String) {

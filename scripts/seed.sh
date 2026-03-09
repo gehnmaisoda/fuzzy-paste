@@ -58,14 +58,29 @@ with open(sys.argv[2], 'wb') as f: f.write(png(200, 60, 70, 130, 230))   # blue
 with open(sys.argv[3], 'wb') as f: f.write(png(320, 240, 50, 190, 110))  # green (history)
 " "$TMP/red.png" "$TMP/blue.png" "$TMP/green.png"
 
-# CSV
+# CSV（横に長い×縦に長いデータ）
 cat > "$TMP/employees.csv" << 'CSV'
-name,email,department,role
-Tanaka Taro,tanaka@example.com,Engineering,Lead
-Suzuki Hanako,suzuki@example.com,Design,Senior
-Sato Jiro,sato@example.com,Marketing,Manager
-Yamada Yuki,yamada@example.com,Engineering,Junior
-Kobayashi Mika,kobayashi@example.com,Sales,Director
+id,name,email,department,role,office,phone,hire_date,salary,status,manager,team,skills,notes
+1,Tanaka Taro,tanaka@example.com,Engineering,Lead,Tokyo HQ,03-1234-5678,2019-04-01,8500000,Active,Yamamoto Ken,Platform,"Go, Rust, K8s",Tech lead for platform team
+2,Suzuki Hanako,suzuki@example.com,Design,Senior,Tokyo HQ,03-2345-6789,2020-06-15,7200000,Active,Ito Megumi,UX,"Figma, Sketch, CSS",Design system owner
+3,Sato Jiro,sato@example.com,Marketing,Manager,Osaka,06-3456-7890,2018-01-10,7800000,Active,Watanabe Ryo,Growth,"Analytics, SQL, Ads",Leads APAC campaigns
+4,Yamada Yuki,yamada@example.com,Engineering,Junior,Tokyo HQ,03-4567-8901,2023-04-01,5000000,Active,Tanaka Taro,Platform,"Python, Docker",New grad 2023
+5,Kobayashi Mika,kobayashi@example.com,Sales,Director,Osaka,06-5678-9012,2016-09-01,9500000,Active,,Enterprise,"Negotiation, CRM",Manages enterprise accounts
+6,Watanabe Ryo,watanabe@example.com,Marketing,VP,Tokyo HQ,03-6789-0123,2015-03-01,11000000,Active,,Marketing,"Strategy, Branding",VP of Marketing
+7,Ito Megumi,ito@example.com,Design,Manager,Tokyo HQ,03-7890-1234,2017-08-20,8000000,Active,Watanabe Ryo,UX,"Research, Prototyping",Design team lead
+8,Nakamura Sota,nakamura@example.com,Engineering,Senior,Fukuoka,092-8901-2345,2019-10-01,7500000,Active,Tanaka Taro,Backend,"Java, Spring, AWS",Backend architect
+9,Matsumoto Aoi,matsumoto@example.com,HR,Manager,Tokyo HQ,03-9012-3456,2018-05-15,7000000,Active,,People,"Recruiting, D&I",HR business partner
+10,Kato Ren,kato@example.com,Engineering,Mid,Tokyo HQ,03-0123-4567,2021-07-01,6200000,Active,Tanaka Taro,Frontend,"React, TypeScript, Next.js",Frontend specialist
+11,Yoshida Mai,yoshida@example.com,Finance,Senior,Tokyo HQ,03-1111-2222,2017-04-01,7800000,Active,,Accounting,"Excel, SAP, IFRS",Quarterly reporting lead
+12,Morita Kenji,morita@example.com,Engineering,Senior,Remote,080-3333-4444,2020-01-15,7600000,Active,Tanaka Taro,SRE,"Terraform, Prometheus, Linux",On-call rotation lead
+13,Fujita Sakura,fujita@example.com,Sales,Mid,Nagoya,052-5555-6666,2022-03-01,5800000,Active,Kobayashi Mika,SMB,"Salesforce, Cold call",Top performer Q3
+14,Ogawa Takumi,ogawa@example.com,Engineering,Mid,Tokyo HQ,03-7777-8888,2022-09-01,6000000,Active,Nakamura Sota,Backend,"Go, PostgreSQL, gRPC",API team
+15,Hasegawa Yui,hasegawa@example.com,Design,Junior,Fukuoka,092-9999-0000,2024-04-01,4500000,Active,Ito Megumi,UX,"Figma, Illustration",New grad 2024
+16,Shimizu Daiki,shimizu@example.com,Engineering,Lead,Remote,080-1212-3434,2018-06-01,8800000,Active,Yamamoto Ken,Mobile,"Swift, Kotlin, Flutter",Mobile team lead
+17,Kimura Hana,kimura@example.com,Marketing,Mid,Tokyo HQ,03-5656-7878,2021-11-01,5500000,Active,Sato Jiro,Content,"SEO, Writing, Analytics",Blog & social media
+18,Hayashi Ryota,hayashi@example.com,Engineering,Senior,Tokyo HQ,03-9090-1212,2019-02-01,7400000,Active,Shimizu Daiki,Mobile,"Swift, UIKit, CoreData",iOS lead developer
+19,Inoue Misaki,inoue@example.com,CS,Manager,Osaka,06-3434-5656,2017-12-01,7200000,Active,,Support,"Zendesk, SQL, Empathy",Customer success lead
+20,Mori Kaito,mori@example.com,Engineering,Intern,Tokyo HQ,03-7878-9090,2025-06-01,3600000,Active,Kato Ren,Frontend,"HTML, CSS, JavaScript",Summer intern 2025
 CSV
 
 # PDF（最小限の有効な PDF）

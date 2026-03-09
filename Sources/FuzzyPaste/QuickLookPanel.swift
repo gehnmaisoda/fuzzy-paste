@@ -1,4 +1,5 @@
 import AppKit
+import FuzzyPasteCore
 
 /// SearchWindow の横に表示される Quick Look パネル。
 /// 選択行を指す吹き出し（三角矢印）付き。上下移動で矢印が追従する。
@@ -14,6 +15,9 @@ final class QuickLookPanel: NSPanel {
         // 画像モード（最大サイズ、画像に合わせて可変）
         static let maxImageWidth: CGFloat = 640
         static let maxImageHeight: CGFloat = 560
+        // CSV モード
+        static let csvWidth: CGFloat = 560
+        static let csvHeight: CGFloat = 440
         static let minContentSize: CGFloat = 200
         static let imagePadding: CGFloat = 8
         // 共通
@@ -33,6 +37,7 @@ final class QuickLookPanel: NSPanel {
     private let imageView = NSImageView()
     private let scrollView = NSScrollView()
     private let textView: NSTextView
+    private let csvTableView = CSVTableView()
 
     private var arrowOnLeft = true
     private var arrowCenterY: CGFloat = Layout.textHeight / 2
@@ -118,6 +123,11 @@ final class QuickLookPanel: NSPanel {
         scrollView.isHidden = true
         containerView.addSubview(scrollView)
 
+        // CSV テーブル
+        csvTableView.translatesAutoresizingMaskIntoConstraints = false
+        csvTableView.isHidden = true
+        containerView.addSubview(csvTableView)
+
         let p = Layout.imagePadding
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: p),
@@ -129,6 +139,11 @@ final class QuickLookPanel: NSPanel {
             scrollView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+
+            csvTableView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: p),
+            csvTableView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: p),
+            csvTableView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -p),
+            csvTableView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -p),
         ])
 
         updateMask()
@@ -228,6 +243,7 @@ final class QuickLookPanel: NSPanel {
         imageView.image = image
         imageView.isHidden = false
         scrollView.isHidden = true
+        csvTableView.isHidden = true
     }
 
     /// テキストをセットし、パネルサイズを固定サイズに戻す。
@@ -239,6 +255,19 @@ final class QuickLookPanel: NSPanel {
 
         textView.string = text
         scrollView.isHidden = false
+        imageView.isHidden = true
+        csvTableView.isHidden = true
+    }
+
+    /// CSV パース結果をテーブル形式で表示する。
+    func showCSV(_ result: CSVParser.Result) {
+        currentContentWidth = Layout.csvWidth
+        currentContentHeight = Layout.csvHeight
+        applyWindowSize()
+
+        csvTableView.setCSV(result)
+        csvTableView.isHidden = false
+        scrollView.isHidden = true
         imageView.isHidden = true
     }
 
