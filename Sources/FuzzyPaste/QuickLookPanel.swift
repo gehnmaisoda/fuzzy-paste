@@ -294,6 +294,17 @@ final class QuickLookPanel: NSPanel {
         pdfViewerView.isHidden = false
     }
 
+    /// URL から PDF をバックグラウンドで読み込んで表示する。
+    func loadPDF(from url: URL) {
+        currentContentWidth = Layout.pdfWidth
+        currentContentHeight = Layout.pdfHeight
+        applyWindowSize()
+
+        pdfViewerView.loadPDF(from: url)
+        hideAllContentViews()
+        pdfViewerView.isHidden = false
+    }
+
     /// 全コンテンツビューを非表示にする。各 show メソッドで呼び出し後に対象だけ表示する。
     private func hideAllContentViews() {
         imageView.isHidden = true

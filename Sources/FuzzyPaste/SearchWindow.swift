@@ -1,6 +1,5 @@
 import AppKit
 import FuzzyPasteCore
-import PDFKit
 
 // MARK: - カスタム行ビュー（角丸セレクション + ホバーエフェクト）
 
@@ -1612,9 +1611,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
            let text = try? String(contentsOf: store.fileURL(for: meta.fileName), encoding: .utf8),
            let result = CSVParser.parseIfCSV(text) {
             panel.showCSV(result)
-        } else if PDFViewerView.fileExtensions.contains(ext),
-                  let document = PDFDocument(url: store.fileURL(for: meta.fileName)) {
-            panel.showPDF(document)
+        } else if PDFViewerView.fileExtensions.contains(ext) {
+            panel.loadPDF(from: store.fileURL(for: meta.fileName))
         } else {
             panel.showFileIcon(store.icon(for: meta))
         }
