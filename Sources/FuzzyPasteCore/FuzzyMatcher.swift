@@ -109,6 +109,49 @@ public enum FuzzyMatcher {
         return scored.sorted { $0.score > $1.score }.map(\.item)
     }
 
+    /// スニペットをフィルタリングし、スコア降順でソートして返す。
+    /// tagFilters が指定された場合、全てのタグを持つスニペットのみ対象にする。
+    public static func filterSnippets(query: String, snippets: [SnippetItem], tagFilters: [String] = []) -> [SnippetItem] {
+        var items = snippets
+        if !tagFilters.isEmpty {
+            items = items.filter { snippet in
+                tagFilters.allSatisfy { snippet.tags.contains($0) }
+            }
+        }
+        if query.isEmpty { return items }
+        return items
+            .compactMap { snippet -> (item: SnippetItem, score: Int)? in
+                guard let score = bestSnippetScore(query: query, snippet: snippet) else { return nil }
+                return (snippet, score)
+            }
+            .sorted { $0.score > $1.score }
+            .map(\.item)
+    }
+
+    /// クエリの各文字がターゲット内のどの位置にマッチしたかを返す。
+    /// マッチしなければ nil。ハイライト表示に使用する。
+    public static func matchPositions(query: String, target: String) -> [Int]? {
+        let queryChars = Array(query.lowercased())
+        let targetChars = Array(target.lowercased())
+        var positions: [Int] = []
+        var targetIdx = 0
+
+        for queryChar in queryChars {
+            var found = false
+            while targetIdx < targetChars.count {
+                if targetChars[targetIdx] == queryChar {
+                    positions.append(targetIdx)
+                    targetIdx += 1
+                    found = true
+                    break
+                }
+                targetIdx += 1
+            }
+            if !found { return nil }
+        }
+        return positions
+    }
+
     /// スニペットのタイトルマッチに加算するボーナス倍率。
     /// クエリ長 × この値を加算し、スニペットが優先的にヒットするようにする。
     private static let snippetTitleBonus = 3
