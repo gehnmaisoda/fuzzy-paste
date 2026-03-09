@@ -56,6 +56,10 @@ final class PDFViewerView: NSView {
         let pageCount = document.pageCount
         pageLabel.stringValue = "\(pageCount) page\(pageCount == 1 ? "" : "s")"
 
+        // 初期表示は 70% 縮小（プレビュー領域が限られるため全体が見えるように）
+        pdfView.autoScales = false
+        pdfView.scaleFactor = 0.7
+
         // 先頭ページに移動（レイアウト確定後に実行しないと効かない）
         if let firstPage = document.page(at: 0) {
             let bounds = firstPage.bounds(for: pdfView.displayBox)

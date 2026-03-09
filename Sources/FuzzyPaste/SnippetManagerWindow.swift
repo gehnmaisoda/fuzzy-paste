@@ -482,10 +482,10 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: - 定数
 
     private enum Layout {
-        static let windowSize = NSSize(width: 1008, height: 691)
+        static let windowSize = NSSize(width: 1200, height: 800)
         static let cornerRadius: CGFloat = 14
         static let padding: CGFloat = 24
-        static let listWidth: CGFloat = 240
+        static let listWidth: CGFloat = 300
         static let headerFontSize: CGFloat = 20
         static let subtitleFontSize: CGFloat = 12
         static let cellTitleFontSize: CGFloat = 13
@@ -494,13 +494,13 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         static let fieldFontSize: CGFloat = 13
         static let spacing: CGFloat = 4
         static let sectionSpacing: CGFloat = 16
-        static let rowHeight: CGFloat = 48
+        static let rowHeight: CGFloat = 60
         static let fieldWrapperHeight: CGFloat = 30
         static let inputCornerRadius: CGFloat = 6
         static let typeSegmentWidth: CGFloat = 240
         static let inputBorderWidth: CGFloat = 0.5
         static let inputPadding: CGFloat = 8
-        static let toolbarHeight: CGFloat = 28
+        static let toolbarHeight: CGFloat = 32
         // 画像・ファイルカード共通
         static let cardHeight: CGFloat = 96
         static let cardCornerRadius: CGFloat = 10
@@ -517,6 +517,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         static let x: UInt16 = 7
         static let z: UInt16 = 6
         static let w: UInt16 = 13
+        static let f: UInt16 = 3
         static let n: UInt16 = 45
         static let delete: UInt16 = 51
     }
@@ -530,9 +531,15 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     // MARK: - UI パーツ
 
+    private let searchField = NSTextField()
+    private var searchIcon: NSImageView!
+    private let suggestionLabel = NSTextField(labelWithString: "")
+    private var filterBadges: [TagBadge] = []
+    private var searchFieldLeading: NSLayoutConstraint!
     private let tableView = HoverTrackingTableView()
     private let tableScrollView = NSScrollView()
     private let emptyStateView = NSView()
+    private let noResultsView = NSView()
     private let titleField = NSTextField()
     private let contentTextView = NSTextView(frame: .zero)
     private let contentScrollView = NSScrollView()
@@ -582,6 +589,14 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private var hasBeenShown = false
     /// フィールド更新中のフラグ。変更通知の再帰を防ぐ。
     private var isUpdatingFields = false
+    /// フィルタリング後のスニペット一覧
+    private var filteredSnippets: [SnippetItem] = []
+    /// アクティブなタグフィルター
+    private var activeTagFilters: [String] = []
+    /// 現在の検索クエリ
+    private var searchQuery: String = ""
+    /// タグサジェスト（ゴーストテキスト）
+    private var suggestedTag: String?
 
     // MARK: - 初期化
 
@@ -683,11 +698,58 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: 左パネル（リスト + ボタン）
 
     private func buildLeftPanel(in panel: NSView) {
-        // ── セクションラベル（右パネルの「スニペット名」ラベルと Y を揃える） ──
+        // ── セクションラベル + 追加ボタン ──
         let listLabel = makeLabel("スニペット一覧")
         panel.addSubview(listLabel)
 
-        // ── テーブルの角丸ラッパー（テーブル + セパレータ + ボタンを内包） ──
+        // モダンな追加ボタン（ラベル右端に配置）
+        let addContainer = NSView()
+        addContainer.wantsLayer = true
+        addContainer.layer?.cornerRadius = 6
+        addContainer.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.85).cgColor
+        addContainer.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(addContainer)
+
+        let addIcon = NSImageView()
+        addIcon.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        addIcon.contentTintColor = .white
+        addIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 10, weight: .bold)
+        addIcon.translatesAutoresizingMaskIntoConstraints = false
+        addContainer.addSubview(addIcon)
+
+        let addLabel = NSTextField(labelWithString: "追加")
+        addLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        addLabel.textColor = .white
+        addLabel.translatesAutoresizingMaskIntoConstraints = false
+        addContainer.addSubview(addLabel)
+
+        NSLayoutConstraint.activate([
+            addIcon.leadingAnchor.constraint(equalTo: addContainer.leadingAnchor, constant: 8),
+            addIcon.centerYAnchor.constraint(equalTo: addContainer.centerYAnchor),
+            addLabel.leadingAnchor.constraint(equalTo: addIcon.trailingAnchor, constant: 3),
+            addLabel.centerYAnchor.constraint(equalTo: addContainer.centerYAnchor),
+            addLabel.trailingAnchor.constraint(equalTo: addContainer.trailingAnchor, constant: -10),
+        ])
+
+        // クリックハンドリング用の透明ボタンを被せる
+        addButton.title = ""
+        addButton.bezelStyle = .recessed
+        addButton.isBordered = false
+        addButton.isTransparent = true
+        addButton.target = self
+        addButton.action = #selector(addClicked)
+        addButton.toolTip = "追加 (⌘N)"
+        addButton.translatesAutoresizingMaskIntoConstraints = false
+        addContainer.addSubview(addButton)
+
+        NSLayoutConstraint.activate([
+            addButton.topAnchor.constraint(equalTo: addContainer.topAnchor),
+            addButton.leadingAnchor.constraint(equalTo: addContainer.leadingAnchor),
+            addButton.trailingAnchor.constraint(equalTo: addContainer.trailingAnchor),
+            addButton.bottomAnchor.constraint(equalTo: addContainer.bottomAnchor),
+        ])
+
+        // ── テーブルの角丸ラッパー（検索 + テーブル + セパレータ + ボタンを内包） ──
         let tableWrapper = NSView()
         tableWrapper.wantsLayer = true
         tableWrapper.layer?.cornerRadius = 8
@@ -696,6 +758,66 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         tableWrapper.layer?.masksToBounds = true
         tableWrapper.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(tableWrapper)
+
+        // ── 検索バー（テーブルラッパー上部に統合） ──
+        let searchContainer = NSView()
+        searchContainer.translatesAutoresizingMaskIntoConstraints = false
+        tableWrapper.addSubview(searchContainer)
+
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
+        icon.contentTintColor = .controlAccentColor.withAlphaComponent(0.6)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        searchContainer.addSubview(icon)
+        searchIcon = icon
+
+        searchField.placeholderString = "検索..."
+        searchField.font = .systemFont(ofSize: 14, weight: .light)
+        searchField.focusRingType = .none
+        searchField.isBordered = false
+        searchField.drawsBackground = false
+        searchField.delegate = self
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchContainer.addSubview(searchField)
+
+        suggestionLabel.font = .systemFont(ofSize: 14, weight: .light)
+        suggestionLabel.textColor = .tertiaryLabelColor
+        suggestionLabel.isHidden = true
+        suggestionLabel.translatesAutoresizingMaskIntoConstraints = false
+        searchContainer.addSubview(suggestionLabel)
+
+        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 4)
+
+        NSLayoutConstraint.activate([
+            searchContainer.topAnchor.constraint(equalTo: tableWrapper.topAnchor),
+            searchContainer.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor),
+            searchContainer.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor),
+            searchContainer.heightAnchor.constraint(equalToConstant: 36),
+
+            icon.leadingAnchor.constraint(equalTo: searchContainer.leadingAnchor, constant: 8),
+            icon.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16),
+
+            searchFieldLeading,
+            searchField.trailingAnchor.constraint(equalTo: searchContainer.trailingAnchor, constant: -4),
+            searchField.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
+
+            suggestionLabel.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
+            suggestionLabel.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+        ])
+
+        // 検索バーとテーブルの間のセパレータ
+        let searchSeparator = NSBox()
+        searchSeparator.boxType = .separator
+        searchSeparator.translatesAutoresizingMaskIntoConstraints = false
+        tableWrapper.addSubview(searchSeparator)
+
+        NSLayoutConstraint.activate([
+            searchSeparator.topAnchor.constraint(equalTo: searchContainer.bottomAnchor),
+            searchSeparator.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor, constant: 10),
+            searchSeparator.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor, constant: -10),
+        ])
 
         // ── テーブル ──
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Col"))
@@ -723,10 +845,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         separator.translatesAutoresizingMaskIntoConstraints = false
         tableWrapper.addSubview(separator)
 
-        // ── ツールバー: [+] [−]          [⋯] （macOS 標準パターン） ──
-        configureToolbarButton(addButton, symbol: "plus", toolTip: "追加 (⌘N)", action: #selector(addClicked))
-        tableWrapper.addSubview(addButton)
-
+        // ── ツールバー: [−]          [⋯] ──
         configureToolbarButton(removeButton, symbol: "minus", toolTip: "削除 (⌘⌫)", action: #selector(removeClicked))
         removeButton.isEnabled = false
         tableWrapper.addSubview(removeButton)
@@ -772,31 +891,58 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             emptyHint.bottomAnchor.constraint(equalTo: emptyStateView.bottomAnchor),
         ])
 
+        // ── 検索結果なしメッセージ ──
+        noResultsView.translatesAutoresizingMaskIntoConstraints = false
+        noResultsView.isHidden = true
+        panel.addSubview(noResultsView)
+
+        let noResultsIcon = NSImageView()
+        noResultsIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
+        noResultsIcon.contentTintColor = .tertiaryLabelColor
+        noResultsIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 24, weight: .thin)
+        noResultsIcon.translatesAutoresizingMaskIntoConstraints = false
+        noResultsView.addSubview(noResultsIcon)
+
+        let noResultsTitle = NSTextField(labelWithString: "一致するスニペットがありません")
+        noResultsTitle.font = .systemFont(ofSize: Layout.fieldFontSize, weight: .medium)
+        noResultsTitle.textColor = .secondaryLabelColor
+        noResultsTitle.alignment = .center
+        noResultsTitle.translatesAutoresizingMaskIntoConstraints = false
+        noResultsView.addSubview(noResultsTitle)
+
+        NSLayoutConstraint.activate([
+            noResultsIcon.topAnchor.constraint(equalTo: noResultsView.topAnchor),
+            noResultsIcon.centerXAnchor.constraint(equalTo: noResultsView.centerXAnchor),
+
+            noResultsTitle.topAnchor.constraint(equalTo: noResultsIcon.bottomAnchor, constant: 8),
+            noResultsTitle.centerXAnchor.constraint(equalTo: noResultsView.centerXAnchor),
+            noResultsTitle.bottomAnchor.constraint(equalTo: noResultsView.bottomAnchor),
+        ])
+
         NSLayoutConstraint.activate([
             listLabel.topAnchor.constraint(equalTo: panel.topAnchor),
             listLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
 
-            tableWrapper.topAnchor.constraint(equalTo: listLabel.bottomAnchor, constant: Layout.spacing),
+            addContainer.bottomAnchor.constraint(equalTo: tableWrapper.topAnchor, constant: -6),
+            addContainer.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            addContainer.heightAnchor.constraint(equalToConstant: 24),
+
+            tableWrapper.topAnchor.constraint(equalTo: listLabel.bottomAnchor, constant: 12),
             tableWrapper.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
             tableWrapper.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
             tableWrapper.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
 
-            tableScrollView.topAnchor.constraint(equalTo: tableWrapper.topAnchor),
+            tableScrollView.topAnchor.constraint(equalTo: searchSeparator.bottomAnchor),
             tableScrollView.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor),
             tableScrollView.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor),
             tableScrollView.bottomAnchor.constraint(equalTo: separator.topAnchor),
 
             separator.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: tableWrapper.trailingAnchor),
-            separator.bottomAnchor.constraint(equalTo: addButton.topAnchor),
+            separator.bottomAnchor.constraint(equalTo: removeButton.topAnchor),
 
-            // ツールバー: [+] [−]          [⚙]
-            addButton.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor, constant: 4),
-            addButton.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor),
-            addButton.heightAnchor.constraint(equalToConstant: Layout.toolbarHeight),
-            addButton.widthAnchor.constraint(equalToConstant: Layout.toolbarHeight),
-
-            removeButton.leadingAnchor.constraint(equalTo: addButton.trailingAnchor),
+            // ツールバー: [−]          [⋯]
+            removeButton.leadingAnchor.constraint(equalTo: tableWrapper.leadingAnchor, constant: 4),
             removeButton.bottomAnchor.constraint(equalTo: tableWrapper.bottomAnchor),
             removeButton.heightAnchor.constraint(equalToConstant: Layout.toolbarHeight),
             removeButton.widthAnchor.constraint(equalToConstant: Layout.toolbarHeight),
@@ -808,6 +954,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
             emptyStateView.centerXAnchor.constraint(equalTo: tableScrollView.centerXAnchor),
             emptyStateView.centerYAnchor.constraint(equalTo: tableScrollView.centerYAnchor),
+
+            noResultsView.centerXAnchor.constraint(equalTo: tableScrollView.centerXAnchor),
+            noResultsView.centerYAnchor.constraint(equalTo: tableScrollView.centerYAnchor),
         ])
     }
 
@@ -1247,8 +1396,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: - 表示
 
     func showWindow() {
-        tableView.reloadData()
-        if !store.items.isEmpty && tableView.selectedRow < 0 {
+        refilter()
+        rebuildFilterBadges()
+        if !filteredSnippets.isEmpty && tableView.selectedRow < 0 {
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         }
         updateEditFields()
@@ -1274,6 +1424,10 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         }
         if event.keyCode == KeyCode.n && flags == .command {
             addClicked()
+            return true
+        }
+        if event.keyCode == KeyCode.f && flags == .command {
+            makeFirstResponder(searchField)
             return true
         }
         // Cmd+Delete: 選択中のスニペットを削除（テキスト編集中は標準の「行頭まで削除」を優先）
@@ -1313,7 +1467,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     // MARK: - NSTableViewDataSource
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        store.items.count
+        filteredSnippets.count
     }
 
     // MARK: - NSTableViewDelegate
@@ -1334,13 +1488,23 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             return cell
         }
 
-        let item = store.items[row]
+        let item = filteredSnippets[row]
 
         // ── 1行目: タイトル ──
         let name = item.title.isEmpty ? "名称未設定" : item.title
-        titleTF.stringValue = name
-        titleTF.font = .systemFont(ofSize: Layout.cellTitleFontSize, weight: .medium)
-        titleTF.textColor = item.title.isEmpty ? .tertiaryLabelColor : .labelColor
+        if !searchQuery.isEmpty, !item.title.isEmpty,
+           let positions = FuzzyMatcher.matchPositions(query: searchQuery, target: name) {
+            titleTF.attributedStringValue = highlightedString(
+                name, positions: positions,
+                font: .systemFont(ofSize: Layout.cellTitleFontSize, weight: .medium),
+                baseColor: .labelColor
+            )
+        } else {
+            titleTF.attributedStringValue = NSAttributedString(string: name, attributes: [
+                .font: NSFont.systemFont(ofSize: Layout.cellTitleFontSize, weight: .medium),
+                .foregroundColor: item.title.isEmpty ? NSColor.tertiaryLabelColor : NSColor.labelColor,
+            ])
+        }
 
         // ── アイコン: コンテンツ型で切替 ──
         switch item.content {
@@ -1359,13 +1523,25 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         switch item.content {
         case .text(let text):
             if text.isEmpty {
-                previewTF.stringValue = "（内容なし）"
-                previewTF.textColor = .tertiaryLabelColor
+                previewTF.attributedStringValue = NSAttributedString(string: "（内容なし）", attributes: [
+                    .font: NSFont.systemFont(ofSize: Layout.cellPreviewFontSize),
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                ])
             } else {
-                previewTF.stringValue = text
-                    .components(separatedBy: .newlines)
-                    .joined(separator: " ")
-                previewTF.textColor = .secondaryLabelColor
+                let preview = text.components(separatedBy: .newlines).joined(separator: " ")
+                if !searchQuery.isEmpty,
+                   let positions = FuzzyMatcher.matchPositions(query: searchQuery, target: preview) {
+                    previewTF.attributedStringValue = highlightedString(
+                        preview, positions: positions,
+                        font: .systemFont(ofSize: Layout.cellPreviewFontSize),
+                        baseColor: .secondaryLabelColor
+                    )
+                } else {
+                    previewTF.attributedStringValue = NSAttributedString(string: preview, attributes: [
+                        .font: NSFont.systemFont(ofSize: Layout.cellPreviewFontSize),
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                    ])
+                }
             }
         case .image(let meta):
             let name = meta.originalFileName ?? meta.fileName
@@ -1397,12 +1573,15 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         titleTF.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(titleTF)
 
-        let previewTF = NSTextField(labelWithString: "")
+        let previewTF = NSTextField(wrappingLabelWithString: "")
         previewTF.tag = CellTag.preview
+        previewTF.maximumNumberOfLines = 2
         previewTF.lineBreakMode = .byTruncatingTail
+        previewTF.isSelectable = false
         previewTF.font = .systemFont(ofSize: Layout.cellPreviewFontSize)
         previewTF.textColor = .secondaryLabelColor
         previewTF.translatesAutoresizingMaskIntoConstraints = false
+        previewTF.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         view.addSubview(previewTF)
 
         NSLayoutConstraint.activate([
@@ -1411,13 +1590,14 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             iconView.widthAnchor.constraint(equalToConstant: 14),
             iconView.heightAnchor.constraint(equalToConstant: 14),
 
-            titleTF.topAnchor.constraint(equalTo: view.topAnchor, constant: 7),
+            titleTF.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
             titleTF.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
             titleTF.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
 
             previewTF.topAnchor.constraint(equalTo: titleTF.bottomAnchor, constant: 1),
             previewTF.leadingAnchor.constraint(equalTo: titleTF.leadingAnchor),
             previewTF.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            previewTF.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -4),
         ])
         return view
     }
@@ -1443,10 +1623,10 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         let row = tableView.selectedRow
         isUpdatingFields = true
         tagContainer.allKnownTags = store.allTags
-        if row >= 0 && row < store.items.count {
+        if row >= 0 && row < filteredSnippets.count {
             editFormContainer.isHidden = false
             noSelectionLabel.isHidden = true
-            let item = store.items[row]
+            let item = filteredSnippets[row]
             titleField.stringValue = item.title
             tagContainer.tags = item.tags
             titleField.isEnabled = true
@@ -1494,8 +1674,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     private func saveCurrentEdits() {
         let row = tableView.selectedRow
-        guard row >= 0, row < store.items.count else { return }
-        let item = store.items[row]
+        guard row >= 0, row < filteredSnippets.count else { return }
+        let item = filteredSnippets[row]
         let content: SnippetContent
         switch item.content {
         case .text:
@@ -1510,14 +1690,27 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             tags: tagContainer.tags
         )
         tagContainer.allKnownTags = store.allTags
-        tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+        // filteredSnippets を更新（タグ変更でフィルタ結果が変わる可能性）
+        let selectedId = item.id
+        filteredSnippets = FuzzyMatcher.filterSnippets(
+            query: searchQuery, snippets: store.items, tagFilters: activeTagFilters
+        )
+        tableView.reloadData()
+        // 編集中のアイテムの選択を維持
+        if let newRow = filteredSnippets.firstIndex(where: { $0.id == selectedId }) {
+            tableView.selectRowIndexes(IndexSet(integer: newRow), byExtendingSelection: false)
+        }
     }
 
     private func updateEmptyState() {
-        let empty = store.items.isEmpty
-        emptyStateView.isHidden = !empty
-        // 空状態のとき右パネルのプレースホルダーも隠す
-        if empty {
+        let storeEmpty = store.items.isEmpty
+        let hasFilter = !searchQuery.isEmpty || !activeTagFilters.isEmpty
+        let filterEmpty = !storeEmpty && hasFilter && filteredSnippets.isEmpty
+
+        emptyStateView.isHidden = !storeEmpty
+        noResultsView.isHidden = !filterEmpty
+        // 空状態/検索結果なしのとき右パネルのプレースホルダーも隠す
+        if storeEmpty || filterEmpty {
             noSelectionLabel.isHidden = true
         }
     }
@@ -1526,11 +1719,57 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     func controlTextDidChange(_ obj: Notification) {
         guard !isUpdatingFields else { return }
+        if (obj.object as AnyObject) === searchField {
+            searchQuery = searchField.stringValue
+            let selectedId = selectedSnippetId()
+            refilter()
+            restoreSelection(for: selectedId)
+            updateEditFields()
+            updateEmptyState()
+            updateSuggestion()
+            return
+        }
         saveCurrentEdits()
     }
 
     /// titleField の Tab でタグフィールドに移動
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        // 検索フィールドのキー処理
+        if control === searchField {
+            // Tab: サジェストがあればタグフィルタ発動
+            if commandSelector == #selector(NSResponder.insertTab(_:)) {
+                if let tag = suggestedTag {
+                    applyTagFilter(tag)
+                    return true
+                }
+                return true
+            }
+            // Backspace: 検索フィールドが空でフィルタ中なら最後のタグを解除
+            if commandSelector == #selector(NSResponder.deleteBackward(_:)) {
+                if searchField.stringValue.isEmpty && !activeTagFilters.isEmpty {
+                    clearLastTagFilter()
+                    return true
+                }
+            }
+            // Escape: 検索クリア
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                if !searchField.stringValue.isEmpty || !activeTagFilters.isEmpty {
+                    searchField.stringValue = ""
+                    searchQuery = ""
+                    activeTagFilters.removeAll()
+                    suggestedTag = nil
+                    suggestionLabel.isHidden = true
+                    rebuildFilterBadges()
+                    let selectedId = selectedSnippetId()
+                    refilter()
+                    restoreSelection(for: selectedId)
+                    updateEditFields()
+                    updateEmptyState()
+                    return true
+                }
+            }
+            return false
+        }
         if commandSelector == #selector(NSResponder.insertTab(_:)) {
             tagContainer.focusInputField()
             return true
@@ -1569,7 +1808,14 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     @objc private func addClicked() {
         store.add(title: "新しいスニペット", content: .text(""))
-        tableView.reloadData()
+        // 検索・フィルターをクリアして新しいスニペットを表示
+        searchField.stringValue = ""
+        searchQuery = ""
+        activeTagFilters.removeAll()
+        suggestedTag = nil
+        suggestionLabel.isHidden = true
+        rebuildFilterBadges()
+        refilter()
         tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         updateEditFields()
         updateEmptyState()
@@ -1579,8 +1825,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     @objc private func typeSegmentChanged() {
         let row = tableView.selectedRow
-        guard row >= 0, row < store.items.count else { return }
-        let item = store.items[row]
+        guard row >= 0, row < filteredSnippets.count else { return }
+        let item = filteredSnippets[row]
 
         let hasContent: Bool
         switch item.content {
@@ -1626,8 +1872,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     private func changeToText() {
         let row = tableView.selectedRow
-        guard row >= 0, row < store.items.count else { return }
-        let item = store.items[row]
+        guard row >= 0, row < filteredSnippets.count else { return }
+        let item = filteredSnippets[row]
         // ストアが既にテキストでもUI（ドロップゾーン）が出ている場合があるので、常にリセット
         if case .text = item.content {
             showContentContainer(.text)
@@ -1636,7 +1882,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         }
         cleanupContentFile(item)
         store.update(id: item.id, title: item.title, content: .text(""), tags: item.tags)
-        tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+        refilter()
+        restoreSelection(for: item.id)
         updateEditFields()
     }
 
@@ -1678,8 +1925,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     /// 確認ダイアログを出してからコンテンツをクリアする共通処理
     private func confirmAndClearContent(label: String) {
         let row = tableView.selectedRow
-        guard row >= 0, row < store.items.count else { return }
-        let item = store.items[row]
+        guard row >= 0, row < filteredSnippets.count else { return }
+        let item = filteredSnippets[row]
 
         let alert = NSAlert()
         alert.messageText = "\(label)を削除しますか？"
@@ -1693,14 +1940,15 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             self.store.update(id: item.id, title: item.title, content: .text(""), tags: item.tags)
             self.typeSegment.selectedSegment = 0
             self.showContentContainer(.text)
-            self.tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+            self.refilter()
+            self.restoreSelection(for: item.id)
             self.updateEditFields()
         }
     }
 
     private func changeToImage() {
         let row = tableView.selectedRow
-        guard row >= 0, row < store.items.count else {
+        guard row >= 0, row < filteredSnippets.count else {
             revertTypeSegment()
             return
         }
@@ -1709,7 +1957,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     private func changeToFile() {
         let row = tableView.selectedRow
-        guard row >= 0, row < store.items.count else {
+        guard row >= 0, row < filteredSnippets.count else {
             revertTypeSegment()
             return
         }
@@ -1719,8 +1967,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     /// ファイル選択キャンセル時にセグメントを現在のコンテンツ型に戻す
     private func revertTypeSegment() {
         let row = tableView.selectedRow
-        guard row >= 0, row < store.items.count else { return }
-        switch store.items[row].content {
+        guard row >= 0, row < filteredSnippets.count else { return }
+        switch filteredSnippets[row].content {
         case .text: typeSegment.selectedSegment = 0
         case .image: typeSegment.selectedSegment = 1
         case .file: typeSegment.selectedSegment = 2
@@ -1730,11 +1978,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     /// ドロップゾーンからファイルが選択された時のハンドラ
     private func handleDroppedFile(_ url: URL, forType type: DropZoneView.Kind) {
         let row = tableView.selectedRow
-        guard row >= 0, row < store.items.count else { return }
+        guard row >= 0, row < filteredSnippets.count else { return }
 
         guard let data = try? Data(contentsOf: url) else { return }
         let originalFileName = url.lastPathComponent
-        let item = store.items[row]
+        let item = filteredSnippets[row]
 
         // 既存の画像・ファイルをクリーンアップ
         cleanupContentFile(item)
@@ -1753,7 +2001,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             store.update(id: item.id, title: item.title, content: .file(metadata), tags: item.tags)
         }
 
-        tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+        refilter()
+        restoreSelection(for: item.id)
         updateEditFields()
     }
 
@@ -1871,8 +2120,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
                 store.importItems(result.new)
             }
 
-            tableView.reloadData()
-            if !store.items.isEmpty {
+            refilter()
+            rebuildFilterBadges()
+            if !filteredSnippets.isEmpty {
                 tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             }
             updateEditFields()
@@ -1982,9 +2232,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     @objc private func removeClicked() {
         let row = tableView.selectedRow
-        guard row >= 0, row < store.items.count else { return }
+        guard row >= 0, row < filteredSnippets.count else { return }
 
-        let item = store.items[row]
+        let item = filteredSnippets[row]
         let title = item.title.isEmpty ? "名称未設定" : item.title
 
         let alert = NSAlert()
@@ -1998,12 +2248,153 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         guard response == .alertFirstButtonReturn else { return }
 
         store.remove(id: item.id)
-        tableView.reloadData()
-        if !store.items.isEmpty {
-            let newRow = min(row, store.items.count - 1)
+        refilter()
+        rebuildFilterBadges()
+        if !filteredSnippets.isEmpty {
+            let newRow = min(row, filteredSnippets.count - 1)
             tableView.selectRowIndexes(IndexSet(integer: newRow), byExtendingSelection: false)
         }
         updateEditFields()
         updateEmptyState()
+    }
+
+    // MARK: - フィルタリング
+
+    /// 検索クエリ + タグフィルターで一覧をフィルタリングし、テーブルを更新する。
+    private func refilter() {
+        filteredSnippets = FuzzyMatcher.filterSnippets(
+            query: searchQuery, snippets: store.items, tagFilters: activeTagFilters
+        )
+        tableView.reloadData()
+    }
+
+    /// 現在選択中のスニペット ID を返す。
+    private func selectedSnippetId() -> UUID? {
+        let row = tableView.selectedRow
+        guard row >= 0, row < filteredSnippets.count else { return nil }
+        return filteredSnippets[row].id
+    }
+
+    /// 指定 ID のスニペットを選択状態に復帰する。
+    private func restoreSelection(for id: UUID?) {
+        guard let id, let newRow = filteredSnippets.firstIndex(where: { $0.id == id }) else {
+            if !filteredSnippets.isEmpty {
+                tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            }
+            return
+        }
+        tableView.selectRowIndexes(IndexSet(integer: newRow), byExtendingSelection: false)
+    }
+
+    // MARK: - タグサジェスト
+
+    /// 検索フィールドの入力に基づいてタグサジェストを更新する。
+    private func updateSuggestion() {
+        let input = searchField.stringValue
+        guard !input.isEmpty else {
+            suggestedTag = nil
+            suggestionLabel.isHidden = true
+            return
+        }
+        let lower = input.lowercased()
+        let allTags = store.allTags
+        if let match = allTags.first(where: {
+            $0.lowercased().hasPrefix(lower) && !activeTagFilters.contains($0)
+        }) {
+            suggestedTag = match
+            suggestionLabel.stringValue = match
+            suggestionLabel.isHidden = false
+        } else {
+            suggestedTag = nil
+            suggestionLabel.isHidden = true
+        }
+    }
+
+    // MARK: - タグフィルタ
+
+    private func applyTagFilter(_ tag: String) {
+        activeTagFilters.append(tag)
+        suggestedTag = nil
+        suggestionLabel.isHidden = true
+        searchField.stringValue = ""
+        searchQuery = ""
+        refreshAfterFilterChange()
+    }
+
+    private func removeTagFilter(_ tag: String) {
+        activeTagFilters.removeAll { $0 == tag }
+        refreshAfterFilterChange()
+    }
+
+    private func clearLastTagFilter() {
+        guard !activeTagFilters.isEmpty else { return }
+        activeTagFilters.removeLast()
+        refreshAfterFilterChange()
+    }
+
+    /// タグフィルタ変更後の共通リフレッシュ処理
+    private func refreshAfterFilterChange() {
+        rebuildFilterBadges()
+        let selectedId = selectedSnippetId()
+        refilter()
+        restoreSelection(for: selectedId)
+        updateEditFields()
+        updateEmptyState()
+    }
+
+    /// タグフィルタバッジを再構築し、検索フィールドの leading を調整する。
+    private func rebuildFilterBadges() {
+        removeAllFilterBadges()
+        guard let container = searchField.superview else { return }
+
+        var prevAnchor = searchIcon.trailingAnchor
+        var prevGap: CGFloat = 4
+
+        for tag in activeTagFilters {
+            let badge = TagBadge(text: tag, showClose: true)
+            let tagToRemove = tag
+            badge.onRemove = { [weak self] in self?.removeTagFilter(tagToRemove) }
+            container.addSubview(badge)
+
+            NSLayoutConstraint.activate([
+                badge.leadingAnchor.constraint(equalTo: prevAnchor, constant: prevGap),
+                badge.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            ])
+            filterBadges.append(badge)
+            prevAnchor = badge.trailingAnchor
+            prevGap = 4
+        }
+
+        searchFieldLeading.isActive = false
+        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: prevAnchor, constant: prevGap)
+        searchFieldLeading.isActive = true
+    }
+
+    private func removeAllFilterBadges() {
+        for badge in filterBadges { badge.removeFromSuperview() }
+        filterBadges.removeAll()
+        searchFieldLeading.isActive = false
+        searchFieldLeading = searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 4)
+        searchFieldLeading.isActive = true
+    }
+
+    // MARK: - ハイライト表示
+
+    /// マッチ位置の文字をアクセントカラー + ボールドでハイライトした NSAttributedString を返す。
+    private func highlightedString(_ text: String, positions: [Int], font: NSFont, baseColor: NSColor) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: text, attributes: [
+            .font: font,
+            .foregroundColor: baseColor,
+        ])
+        let chars = Array(text)
+        let boldFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        for pos in positions where pos < chars.count {
+            let range = NSRange(location: pos, length: 1)
+            result.addAttributes([
+                .foregroundColor: NSColor.controlAccentColor,
+                .font: boldFont,
+            ], range: range)
+        }
+        return result
     }
 }
