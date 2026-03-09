@@ -1206,6 +1206,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         textContentContainer.isHidden = true
         imageContentContainer.isHidden = true
         fileContentContainer.isHidden = true
+        fileCsvTableView.isHidden = true
 
         switch display {
         case .text:
