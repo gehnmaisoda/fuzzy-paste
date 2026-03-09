@@ -1,5 +1,6 @@
 import AppKit
 import FuzzyPasteCore
+import PDFKit
 
 /// SearchWindow の横に表示される Quick Look パネル。
 /// 選択行を指す吹き出し（三角矢印）付き。上下移動で矢印が追従する。
@@ -18,6 +19,9 @@ final class QuickLookPanel: NSPanel {
         // CSV モード
         static let csvWidth: CGFloat = 560
         static let csvHeight: CGFloat = 440
+        // PDF モード
+        static let pdfWidth: CGFloat = 560
+        static let pdfHeight: CGFloat = 500
         static let minContentSize: CGFloat = 200
         static let imagePadding: CGFloat = 8
         // 共通
@@ -38,6 +42,7 @@ final class QuickLookPanel: NSPanel {
     private let scrollView = NSScrollView()
     private let textView: NSTextView
     private let csvTableView = CSVTableView()
+    private let pdfViewerView = PDFViewerView()
 
     private var arrowOnLeft = true
     private var arrowCenterY: CGFloat = Layout.textHeight / 2
@@ -128,6 +133,11 @@ final class QuickLookPanel: NSPanel {
         csvTableView.isHidden = true
         containerView.addSubview(csvTableView)
 
+        // PDF ビューアー
+        pdfViewerView.translatesAutoresizingMaskIntoConstraints = false
+        pdfViewerView.isHidden = true
+        containerView.addSubview(pdfViewerView)
+
         let p = Layout.imagePadding
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: p),
@@ -144,6 +154,11 @@ final class QuickLookPanel: NSPanel {
             csvTableView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: p),
             csvTableView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -p),
             csvTableView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -p),
+
+            pdfViewerView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: p),
+            pdfViewerView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: p),
+            pdfViewerView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -p),
+            pdfViewerView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -p),
         ])
 
         updateMask()
@@ -241,9 +256,8 @@ final class QuickLookPanel: NSPanel {
         applyWindowSize()
 
         imageView.image = image
+        hideAllContentViews()
         imageView.isHidden = false
-        scrollView.isHidden = true
-        csvTableView.isHidden = true
     }
 
     /// テキストをセットし、パネルサイズを固定サイズに戻す。
@@ -254,9 +268,8 @@ final class QuickLookPanel: NSPanel {
         applyWindowSize()
 
         textView.string = text
+        hideAllContentViews()
         scrollView.isHidden = false
-        imageView.isHidden = true
-        csvTableView.isHidden = true
     }
 
     /// CSV パース結果をテーブル形式で表示する。
@@ -266,9 +279,27 @@ final class QuickLookPanel: NSPanel {
         applyWindowSize()
 
         csvTableView.setCSV(result)
+        hideAllContentViews()
         csvTableView.isHidden = false
-        scrollView.isHidden = true
+    }
+
+    /// PDF ドキュメントをビューアーで表示する。
+    func showPDF(_ document: PDFDocument) {
+        currentContentWidth = Layout.pdfWidth
+        currentContentHeight = Layout.pdfHeight
+        applyWindowSize()
+
+        pdfViewerView.setPDF(document)
+        hideAllContentViews()
+        pdfViewerView.isHidden = false
+    }
+
+    /// 全コンテンツビューを非表示にする。各 show メソッドで呼び出し後に対象だけ表示する。
+    private func hideAllContentViews() {
         imageView.isHidden = true
+        scrollView.isHidden = true
+        csvTableView.isHidden = true
+        pdfViewerView.isHidden = true
     }
 
     /// ウィンドウフレーム確定後にテキストを再レイアウトし、先頭にスクロールする。
