@@ -1,6 +1,5 @@
 import AppKit
 import FuzzyPasteCore
-import PDFKit
 import UniformTypeIdentifiers
 
 /// スニペット一覧の行ビュー。角丸選択ハイライト + ホバーエフェクト。
@@ -1911,9 +1910,8 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             fileCsvTableView.setCSV(result)
             fileCsvTableView.isHidden = false
             filePdfViewerView.isHidden = true
-        } else if PDFViewerView.fileExtensions.contains(ext),
-                  let document = PDFDocument(url: fileStore.fileURL(for: meta.fileName)) {
-            filePdfViewerView.setPDF(document)
+        } else if PDFViewerView.fileExtensions.contains(ext) {
+            filePdfViewerView.loadPDF(from: fileStore.fileURL(for: meta.fileName))
             filePdfViewerView.isHidden = false
             fileCsvTableView.isHidden = true
         } else {

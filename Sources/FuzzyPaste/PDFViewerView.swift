@@ -6,6 +6,8 @@ import PDFKit
 final class PDFViewerView: NSView {
     private let pdfView = PDFView()
     private let pageLabel = NSTextField(labelWithString: "")
+    /// 読み込み中の PDF を識別し、完了時に別の PDF に切り替わっていたら破棄する
+    private var currentLoadingKey: String?
 
     /// PDF ファイル拡張子
     static let fileExtensions: Set<String> = ["pdf"]
@@ -50,8 +52,33 @@ final class PDFViewerView: NSView {
         ])
     }
 
+    /// URL から PDF をバックグラウンドで読み込んで表示する。
+    /// キャッシュ済みの場合は即座に表示する。
+    func loadPDF(from url: URL) {
+        let cacheKey = url.lastPathComponent
+        if let cached = Self.documentCache.object(forKey: cacheKey as NSString) {
+            applyDocument(cached)
+            return
+        }
+        // 読み込み完了時に別の PDF に切り替わっていた場合は破棄する
+        currentLoadingKey = cacheKey
+        let path = url.path
+        Task.detached(priority: .userInitiated) {
+            guard let document = PDFDocument(url: URL(fileURLWithPath: path)) else { return }
+            await MainActor.run { [weak self] in
+                guard let self, self.currentLoadingKey == cacheKey else { return }
+                Self.documentCache.setObject(document, forKey: cacheKey as NSString)
+                self.applyDocument(document)
+            }
+        }
+    }
+
     /// PDF ドキュメントをセットして表示する。
     func setPDF(_ document: PDFDocument) {
+        applyDocument(document)
+    }
+
+    private func applyDocument(_ document: PDFDocument) {
         pdfView.document = document
         let pageCount = document.pageCount
         pageLabel.stringValue = "\(pageCount) page\(pageCount == 1 ? "" : "s")"
@@ -86,6 +113,12 @@ final class PDFViewerView: NSView {
     private static let thumbnailCache: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
         cache.countLimit = 50
+        return cache
+    }()
+
+    private static let documentCache: NSCache<NSString, PDFDocument> = {
+        let cache = NSCache<NSString, PDFDocument>()
+        cache.countLimit = 10
         return cache
     }()
 }
