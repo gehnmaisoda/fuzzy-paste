@@ -1,5 +1,6 @@
 import AppKit
 import FuzzyPasteCore
+import PDFKit
 
 // MARK: - カスタム行ビュー（角丸セレクション + ホバーエフェクト）
 
@@ -1264,7 +1265,14 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         }
 
         iconView.isHidden = false
-        iconView.image = fileStore?.icon(for: meta)
+        // PDF は1ページ目のサムネイルを表示（キャッシュ付き）
+        if PDFViewerView.fileExtensions.contains(meta.fileExtension.lowercased()),
+           let store = fileStore,
+           let thumb = PDFViewerView.thumbnail(for: store.fileURL(for: meta.fileName), size: layout.thumbSize) {
+            iconView.image = thumb
+        } else {
+            iconView.image = fileStore?.icon(for: meta)
+        }
         titleLabel.stringValue = meta.originalFileName
 
         let sizeStr = formatFileSize(meta.fileSizeBytes)
@@ -1559,7 +1567,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         case .clip(let clipItem):
             switch clipItem.content {
             case .text(let text):
-                showTextOrCSV(text, in: panel)
+                showTextPreview(text, in: panel)
             case .image(let meta):
                 if let store = imageStore,
                    let image = NSImage(contentsOf: store.imageURL(for: meta.fileName)) {
@@ -1568,12 +1576,12 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                     panel.showImage(thumb)
                 }
             case .file(let meta):
-                showFileOrCSV(meta, in: panel)
+                showFilePreview(meta, in: panel)
             }
         case .snippet(let snippet):
             switch snippet.content {
             case .text(let text):
-                showTextOrCSV(text, in: panel)
+                showTextPreview(text, in: panel)
             case .image(let meta):
                 if let store = imageStore,
                    let image = NSImage(contentsOf: store.imageURL(for: meta.fileName)) {
@@ -1582,13 +1590,13 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                     panel.showImage(thumb)
                 }
             case .file(let meta):
-                showFileOrCSV(meta, in: panel)
+                showFilePreview(meta, in: panel)
             }
         }
     }
 
-    /// テキストが CSV なら CSV ビューアー、そうでなければテキストとして表示する。
-    private func showTextOrCSV(_ text: String, in panel: QuickLookPanel) {
+    /// テキストが CSV なら CSV ビューアー、それ以外はテキストとして表示する。
+    private func showTextPreview(_ text: String, in panel: QuickLookPanel) {
         if let result = CSVParser.parseIfCSV(text) {
             panel.showCSV(result)
         } else {
@@ -1596,13 +1604,17 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         }
     }
 
-    /// ファイルが CSV/TSV なら内容を読み取って CSV ビューアーで表示する。
-    private func showFileOrCSV(_ meta: FileMetadata, in panel: QuickLookPanel) {
+    /// ファイルの種類に応じた専用ビューアーで表示する（CSV/PDF）。非対応ならアイコン表示。
+    private func showFilePreview(_ meta: FileMetadata, in panel: QuickLookPanel) {
         guard let store = fileStore else { return }
-        if CSVParser.fileExtensions.contains(meta.fileExtension.lowercased()),
+        let ext = meta.fileExtension.lowercased()
+        if CSVParser.fileExtensions.contains(ext),
            let text = try? String(contentsOf: store.fileURL(for: meta.fileName), encoding: .utf8),
            let result = CSVParser.parseIfCSV(text) {
             panel.showCSV(result)
+        } else if PDFViewerView.fileExtensions.contains(ext),
+                  let document = PDFDocument(url: store.fileURL(for: meta.fileName)) {
+            panel.showPDF(document)
         } else {
             panel.showFileIcon(store.icon(for: meta))
         }

@@ -1,5 +1,6 @@
 import AppKit
 import FuzzyPasteCore
+import PDFKit
 import UniformTypeIdentifiers
 
 /// スニペット一覧の行ビュー。角丸選択ハイライト + ホバーエフェクト。
@@ -567,6 +568,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private let fileCardView = NSView()
     private let fileClearButton = NSButton()
     private let fileCsvTableView = CSVTableView()
+    private let filePdfViewerView = PDFViewerView()
 
     // ドロップゾーン（画像/ファイル選択用）
     private let imageDropZone = DropZoneView(kind: .image)
@@ -1008,6 +1010,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         fileCsvTableView.isHidden = true
         fileWrapper.addSubview(fileCsvTableView)
 
+        // PDF プレビュービューアー
+        filePdfViewerView.translatesAutoresizingMaskIntoConstraints = false
+        filePdfViewerView.isHidden = true
+        fileWrapper.addSubview(filePdfViewerView)
+
         // ドロップゾーン（ファイル）
         fileDropZone.onFileSelected = { [weak self] url in
             self?.handleDroppedFile(url, forType: .file)
@@ -1144,6 +1151,12 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             fileCsvTableView.trailingAnchor.constraint(equalTo: fileWrapper.trailingAnchor, constant: -Layout.inputPadding),
             fileCsvTableView.bottomAnchor.constraint(equalTo: fileWrapper.bottomAnchor, constant: -Layout.inputPadding),
 
+            // PDF プレビュービューアー
+            filePdfViewerView.topAnchor.constraint(equalTo: fileCardView.bottomAnchor, constant: 8),
+            filePdfViewerView.leadingAnchor.constraint(equalTo: fileWrapper.leadingAnchor, constant: Layout.inputPadding),
+            filePdfViewerView.trailingAnchor.constraint(equalTo: fileWrapper.trailingAnchor, constant: -Layout.inputPadding),
+            filePdfViewerView.bottomAnchor.constraint(equalTo: fileWrapper.bottomAnchor, constant: -Layout.inputPadding),
+
             // ファイルドロップゾーン
             fileDropZone.topAnchor.constraint(equalTo: fileContentContainer.topAnchor),
             fileDropZone.leadingAnchor.constraint(equalTo: fileContentContainer.leadingAnchor),
@@ -1207,6 +1220,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         imageContentContainer.isHidden = true
         fileContentContainer.isHidden = true
         fileCsvTableView.isHidden = true
+        filePdfViewerView.isHidden = true
 
         switch display {
         case .text:
@@ -1468,7 +1482,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
                 let ext = meta.fileExtension.uppercased()
                 let size = formatFileSize(meta.fileSizeBytes)
                 fileInfoLabel.stringValue = ext.isEmpty ? size : "\(ext) · \(size)"
-                updateCsvPreview(for: meta)
+                updateFilePreview(for: meta)
             }
         } else {
             editFormContainer.isHidden = true
@@ -1641,15 +1655,23 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     @objc private func clearImageContent() { confirmAndClearContent(label: "画像") }
     @objc private func clearFileContent() { confirmAndClearContent(label: "ファイル") }
 
-    /// ファイルが CSV なら CSV テーブルを表示する。
-    private func updateCsvPreview(for meta: FileMetadata) {
-        if CSVParser.fileExtensions.contains(meta.fileExtension.lowercased()),
+    /// ファイルが CSV/PDF なら専用ビューアーを表示する。
+    private func updateFilePreview(for meta: FileMetadata) {
+        let ext = meta.fileExtension.lowercased()
+        if CSVParser.fileExtensions.contains(ext),
            let text = try? String(contentsOf: fileStore.fileURL(for: meta.fileName), encoding: .utf8),
            let result = CSVParser.parseIfCSV(text) {
             fileCsvTableView.setCSV(result)
             fileCsvTableView.isHidden = false
+            filePdfViewerView.isHidden = true
+        } else if PDFViewerView.fileExtensions.contains(ext),
+                  let document = PDFDocument(url: fileStore.fileURL(for: meta.fileName)) {
+            filePdfViewerView.setPDF(document)
+            filePdfViewerView.isHidden = false
+            fileCsvTableView.isHidden = true
         } else {
             fileCsvTableView.isHidden = true
+            filePdfViewerView.isHidden = true
         }
     }
 
