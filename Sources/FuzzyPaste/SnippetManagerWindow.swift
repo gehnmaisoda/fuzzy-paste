@@ -500,6 +500,13 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         static let inputBorderWidth: CGFloat = 0.5
         static let inputPadding: CGFloat = 8
         static let toolbarHeight: CGFloat = 28
+        // 画像・ファイルカード共通
+        static let cardHeight: CGFloat = 96
+        static let cardCornerRadius: CGFloat = 10
+        static let cardPadding: CGFloat = 12
+        static let imageThumbSize: CGFloat = 72
+        static let fileIconSize: CGFloat = 56
+        static let clearButtonSize: CGFloat = 24
     }
 
     private enum KeyCode {
@@ -549,12 +556,16 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
     private let textContentContainer = NSView()
     private let imageContentContainer = NSView()
     private let fileContentContainer = NSView()
+    private let imageCardView = NSView()
     private let imagePreviewView = NSImageView()
+    private let imageNameLabel = NSTextField(labelWithString: "")
     private let imageInfoLabel = NSTextField(labelWithString: "")
+    private let imageClearButton = NSButton()
     private let fileIconView = NSImageView()
     private let fileNameLabel = NSTextField(labelWithString: "")
     private let fileInfoLabel = NSTextField(labelWithString: "")
     private let fileCardView = NSView()
+    private let fileClearButton = NSButton()
 
     // ドロップゾーン（画像/ファイル選択用）
     private let imageDropZone = DropZoneView(kind: .image)
@@ -923,17 +934,33 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         let imageWrapper = makeStyledWrapper()
         imageContentContainer.addSubview(imageWrapper)
 
+        // カード型画像プレビュー（サムネイル + ファイル名 + メタ情報を横並び）
+        imageCardView.wantsLayer = true
+        imageCardView.layer?.cornerRadius = Layout.cardCornerRadius
+        imageCardView.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
+        imageCardView.translatesAutoresizingMaskIntoConstraints = false
+        imageWrapper.addSubview(imageCardView)
+
         imagePreviewView.imageScaling = .scaleProportionallyDown
         imagePreviewView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         imagePreviewView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         imagePreviewView.translatesAutoresizingMaskIntoConstraints = false
-        imageWrapper.addSubview(imagePreviewView)
+        imageCardView.addSubview(imagePreviewView)
 
-        imageInfoLabel.font = .systemFont(ofSize: Layout.cellPreviewFontSize)
+        imageNameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        imageNameLabel.textColor = .labelColor
+        imageNameLabel.lineBreakMode = .byTruncatingTail
+        imageNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        imageCardView.addSubview(imageNameLabel)
+
+        imageInfoLabel.font = .systemFont(ofSize: 11)
         imageInfoLabel.textColor = .secondaryLabelColor
         imageInfoLabel.lineBreakMode = .byTruncatingTail
         imageInfoLabel.translatesAutoresizingMaskIntoConstraints = false
-        imageWrapper.addSubview(imageInfoLabel)
+        imageCardView.addSubview(imageInfoLabel)
+
+        configureToolbarButton(imageClearButton, symbol: "trash", toolTip: "画像を削除", action: #selector(clearImageContent))
+        imageCardView.addSubview(imageClearButton)
 
         // ドロップゾーン（画像）
         imageDropZone.onFileSelected = { [weak self] url in
@@ -951,7 +978,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
         // カード型ファイルプレビュー（アイコン + ファイル名 + メタ情報を横並び）
         fileCardView.wantsLayer = true
-        fileCardView.layer?.cornerRadius = 10
+        fileCardView.layer?.cornerRadius = Layout.cardCornerRadius
         fileCardView.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
         fileCardView.translatesAutoresizingMaskIntoConstraints = false
         fileWrapper.addSubview(fileCardView)
@@ -971,6 +998,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         fileInfoLabel.lineBreakMode = .byTruncatingTail
         fileInfoLabel.translatesAutoresizingMaskIntoConstraints = false
         fileCardView.addSubview(fileInfoLabel)
+
+        configureToolbarButton(fileClearButton, symbol: "trash", toolTip: "ファイルを削除", action: #selector(clearFileContent))
+        fileCardView.addSubview(fileClearButton)
 
         // ドロップゾーン（ファイル）
         fileDropZone.onFileSelected = { [weak self] url in
@@ -1039,14 +1069,28 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             imageWrapper.trailingAnchor.constraint(equalTo: imageContentContainer.trailingAnchor),
             imageWrapper.bottomAnchor.constraint(equalTo: imageContentContainer.bottomAnchor),
 
-            imagePreviewView.topAnchor.constraint(equalTo: imageWrapper.topAnchor, constant: Layout.inputPadding),
-            imagePreviewView.leadingAnchor.constraint(equalTo: imageWrapper.leadingAnchor, constant: Layout.inputPadding),
-            imagePreviewView.trailingAnchor.constraint(equalTo: imageWrapper.trailingAnchor, constant: -Layout.inputPadding),
-            imagePreviewView.bottomAnchor.constraint(equalTo: imageInfoLabel.topAnchor, constant: -Layout.spacing),
+            imageCardView.topAnchor.constraint(equalTo: imageWrapper.topAnchor, constant: Layout.inputPadding),
+            imageCardView.leadingAnchor.constraint(equalTo: imageWrapper.leadingAnchor, constant: Layout.inputPadding),
+            imageCardView.trailingAnchor.constraint(equalTo: imageWrapper.trailingAnchor, constant: -Layout.inputPadding),
+            imageCardView.heightAnchor.constraint(equalToConstant: Layout.cardHeight),
 
-            imageInfoLabel.leadingAnchor.constraint(equalTo: imageWrapper.leadingAnchor, constant: Layout.inputPadding),
-            imageInfoLabel.trailingAnchor.constraint(equalTo: imageWrapper.trailingAnchor, constant: -Layout.inputPadding),
-            imageInfoLabel.bottomAnchor.constraint(equalTo: imageWrapper.bottomAnchor, constant: -Layout.inputPadding),
+            imagePreviewView.leadingAnchor.constraint(equalTo: imageCardView.leadingAnchor, constant: Layout.cardPadding),
+            imagePreviewView.centerYAnchor.constraint(equalTo: imageCardView.centerYAnchor),
+            imagePreviewView.widthAnchor.constraint(equalToConstant: Layout.imageThumbSize),
+            imagePreviewView.heightAnchor.constraint(equalToConstant: Layout.imageThumbSize),
+
+            imageNameLabel.leadingAnchor.constraint(equalTo: imagePreviewView.trailingAnchor, constant: 10),
+            imageNameLabel.trailingAnchor.constraint(equalTo: imageClearButton.leadingAnchor, constant: -4),
+            imageNameLabel.bottomAnchor.constraint(equalTo: imageCardView.centerYAnchor, constant: -1),
+
+            imageInfoLabel.leadingAnchor.constraint(equalTo: imageNameLabel.leadingAnchor),
+            imageInfoLabel.trailingAnchor.constraint(equalTo: imageNameLabel.trailingAnchor),
+            imageInfoLabel.topAnchor.constraint(equalTo: imageCardView.centerYAnchor, constant: 1),
+
+            imageClearButton.trailingAnchor.constraint(equalTo: imageCardView.trailingAnchor, constant: -Layout.cardPadding),
+            imageClearButton.centerYAnchor.constraint(equalTo: imageCardView.centerYAnchor),
+            imageClearButton.widthAnchor.constraint(equalToConstant: Layout.clearButtonSize),
+            imageClearButton.heightAnchor.constraint(equalToConstant: Layout.clearButtonSize),
 
             // 画像ドロップゾーン
             imageDropZone.topAnchor.constraint(equalTo: imageContentContainer.topAnchor),
@@ -1068,20 +1112,25 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             fileCardView.topAnchor.constraint(equalTo: fileWrapper.topAnchor, constant: Layout.inputPadding),
             fileCardView.leadingAnchor.constraint(equalTo: fileWrapper.leadingAnchor, constant: Layout.inputPadding),
             fileCardView.trailingAnchor.constraint(equalTo: fileWrapper.trailingAnchor, constant: -Layout.inputPadding),
-            fileCardView.heightAnchor.constraint(equalToConstant: 56),
+            fileCardView.heightAnchor.constraint(equalToConstant: Layout.cardHeight),
 
-            fileIconView.leadingAnchor.constraint(equalTo: fileCardView.leadingAnchor, constant: 12),
+            fileIconView.leadingAnchor.constraint(equalTo: fileCardView.leadingAnchor, constant: Layout.cardPadding),
             fileIconView.centerYAnchor.constraint(equalTo: fileCardView.centerYAnchor),
-            fileIconView.widthAnchor.constraint(equalToConstant: 32),
-            fileIconView.heightAnchor.constraint(equalToConstant: 32),
+            fileIconView.widthAnchor.constraint(equalToConstant: Layout.fileIconSize),
+            fileIconView.heightAnchor.constraint(equalToConstant: Layout.fileIconSize),
 
             fileNameLabel.leadingAnchor.constraint(equalTo: fileIconView.trailingAnchor, constant: 10),
-            fileNameLabel.trailingAnchor.constraint(equalTo: fileCardView.trailingAnchor, constant: -12),
+            fileNameLabel.trailingAnchor.constraint(equalTo: fileClearButton.leadingAnchor, constant: -4),
             fileNameLabel.bottomAnchor.constraint(equalTo: fileCardView.centerYAnchor, constant: -1),
 
             fileInfoLabel.leadingAnchor.constraint(equalTo: fileNameLabel.leadingAnchor),
             fileInfoLabel.trailingAnchor.constraint(equalTo: fileNameLabel.trailingAnchor),
             fileInfoLabel.topAnchor.constraint(equalTo: fileCardView.centerYAnchor, constant: 1),
+
+            fileClearButton.trailingAnchor.constraint(equalTo: fileCardView.trailingAnchor, constant: -Layout.cardPadding),
+            fileClearButton.centerYAnchor.constraint(equalTo: fileCardView.centerYAnchor),
+            fileClearButton.widthAnchor.constraint(equalToConstant: Layout.clearButtonSize),
+            fileClearButton.heightAnchor.constraint(equalToConstant: Layout.clearButtonSize),
 
             // ファイルドロップゾーン
             fileDropZone.topAnchor.constraint(equalTo: fileContentContainer.topAnchor),
@@ -1152,13 +1201,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         case .imageDropZone:
             imageContentContainer.isHidden = false
             imageDropZone.isHidden = false
-            imagePreviewView.isHidden = true
-            imageInfoLabel.isHidden = true
+            imageCardView.isHidden = true
         case .imagePreview:
             imageContentContainer.isHidden = false
             imageDropZone.isHidden = true
-            imagePreviewView.isHidden = false
-            imageInfoLabel.isHidden = false
+            imageCardView.isHidden = false
         case .fileDropZone:
             fileContentContainer.isHidden = false
             fileDropZone.isHidden = false
@@ -1392,10 +1439,12 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
                 showContentContainer(.imagePreview)
                 contentTextView.isEditable = false
                 contentTextView.isSelectable = false
-                imagePreviewView.image = NSImage(contentsOf: imageStore.imageURL(for: meta.fileName))
-                    ?? imageStore.thumbnail(for: meta.fileName)
-                let name = meta.originalFileName ?? meta.fileName
-                imageInfoLabel.stringValue = "\(name)  \(meta.pixelWidth)x\(meta.pixelHeight)  \(formatFileSize(meta.fileSizeBytes))"
+                imagePreviewView.image = imageStore.thumbnail(for: meta.fileName)
+                    ?? NSImage(contentsOf: imageStore.imageURL(for: meta.fileName))
+                imageNameLabel.stringValue = meta.originalFileName ?? meta.fileName
+                let dims = "\(meta.pixelWidth)x\(meta.pixelHeight)"
+                let size = formatFileSize(meta.fileSizeBytes)
+                imageInfoLabel.stringValue = "\(dims) · \(size)"
             case .file(let meta):
                 typeSegment.selectedSegment = 2
                 showContentContainer(.filePreview)
@@ -1557,9 +1606,48 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             updateEditFields()
             return
         }
+        cleanupContentFile(item)
         store.update(id: item.id, title: item.title, content: .text(""), tags: item.tags)
         tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
         updateEditFields()
+    }
+
+    /// 画像・ファイルコンテンツのディスク上のファイルを削除する
+    private func cleanupContentFile(_ item: SnippetItem) {
+        switch item.content {
+        case .image(let meta):
+            store.onImageDelete?(meta.fileName)
+        case .file(let meta):
+            store.onFileDelete?(meta.fileName)
+        case .text:
+            break
+        }
+    }
+
+    @objc private func clearImageContent() { confirmAndClearContent(label: "画像") }
+    @objc private func clearFileContent() { confirmAndClearContent(label: "ファイル") }
+
+    /// 確認ダイアログを出してからコンテンツをクリアする共通処理
+    private func confirmAndClearContent(label: String) {
+        let row = tableView.selectedRow
+        guard row >= 0, row < store.items.count else { return }
+        let item = store.items[row]
+
+        let alert = NSAlert()
+        alert.messageText = "\(label)を削除しますか？"
+        alert.informativeText = "登録済みの\(label)が削除されます。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "削除")
+        alert.addButton(withTitle: "キャンセル")
+        alert.beginSheetModal(for: self) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            self.cleanupContentFile(item)
+            self.store.update(id: item.id, title: item.title, content: .text(""), tags: item.tags)
+            self.typeSegment.selectedSegment = 0
+            self.showContentContainer(.text)
+            self.tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+            self.updateEditFields()
+        }
     }
 
     private func changeToImage() {
@@ -1599,6 +1687,9 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         guard let data = try? Data(contentsOf: url) else { return }
         let originalFileName = url.lastPathComponent
         let item = store.items[row]
+
+        // 既存の画像・ファイルをクリーンアップ
+        cleanupContentFile(item)
 
         // ファイルタイプでも画像ファイルなら自動的に画像として処理
         let isImage = type == .image

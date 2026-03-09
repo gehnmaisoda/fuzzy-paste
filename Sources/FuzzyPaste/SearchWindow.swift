@@ -1569,7 +1569,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 }
             case .file(let meta):
                 if let store = fileStore {
-                    panel.showImage(store.icon(for: meta))
+                    panel.showFileIcon(store.icon(for: meta))
                 }
             }
         case .snippet(let snippet):
@@ -1585,7 +1585,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 }
             case .file(let meta):
                 if let store = fileStore {
-                    panel.showImage(store.icon(for: meta))
+                    panel.showFileIcon(store.icon(for: meta))
                 }
             }
         }

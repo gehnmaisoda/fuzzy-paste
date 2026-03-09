@@ -193,6 +193,17 @@ final class QuickLookPanel: NSPanel {
 
     // MARK: - Content
 
+    /// ファイルアイコンをセットし、パネル中央に表示する。
+    /// アイコンは 128pt にリサイズして showImage に渡す。
+    func showFileIcon(_ icon: NSImage) {
+        let iconSize: CGFloat = 128
+        let sized = NSImage(size: NSSize(width: iconSize, height: iconSize), flipped: false) { rect in
+            icon.draw(in: rect)
+            return true
+        }
+        showImage(sized)
+    }
+
     /// 画像をセットし、パネルサイズを画像のアスペクト比に合わせて調整する。
     func showImage(_ image: NSImage) {
         let rep = image.representations.first
