@@ -1559,7 +1559,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         case .clip(let clipItem):
             switch clipItem.content {
             case .text(let text):
-                panel.showText(text)
+                showTextOrCSV(text, in: panel)
             case .image(let meta):
                 if let store = imageStore,
                    let image = NSImage(contentsOf: store.imageURL(for: meta.fileName)) {
@@ -1568,14 +1568,12 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                     panel.showImage(thumb)
                 }
             case .file(let meta):
-                if let store = fileStore {
-                    panel.showFileIcon(store.icon(for: meta))
-                }
+                showFileOrCSV(meta, in: panel)
             }
         case .snippet(let snippet):
             switch snippet.content {
             case .text(let text):
-                panel.showText(text)
+                showTextOrCSV(text, in: panel)
             case .image(let meta):
                 if let store = imageStore,
                    let image = NSImage(contentsOf: store.imageURL(for: meta.fileName)) {
@@ -1584,10 +1582,29 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                     panel.showImage(thumb)
                 }
             case .file(let meta):
-                if let store = fileStore {
-                    panel.showFileIcon(store.icon(for: meta))
-                }
+                showFileOrCSV(meta, in: panel)
             }
+        }
+    }
+
+    /// テキストが CSV なら CSV ビューアー、そうでなければテキストとして表示する。
+    private func showTextOrCSV(_ text: String, in panel: QuickLookPanel) {
+        if let result = CSVParser.parseIfCSV(text) {
+            panel.showCSV(result)
+        } else {
+            panel.showText(text)
+        }
+    }
+
+    /// ファイルが CSV/TSV なら内容を読み取って CSV ビューアーで表示する。
+    private func showFileOrCSV(_ meta: FileMetadata, in panel: QuickLookPanel) {
+        guard let store = fileStore else { return }
+        if CSVParser.fileExtensions.contains(meta.fileExtension.lowercased()),
+           let text = try? String(contentsOf: store.fileURL(for: meta.fileName), encoding: .utf8),
+           let result = CSVParser.parseIfCSV(text) {
+            panel.showCSV(result)
+        } else {
+            panel.showFileIcon(store.icon(for: meta))
         }
     }
 
