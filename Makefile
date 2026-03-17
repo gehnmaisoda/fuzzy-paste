@@ -5,7 +5,7 @@ BUILD_DIR = .build/release
 APP_BUNDLE = $(APP_NAME).app
 DEV_FLAGS = -Xswiftc -DDEV
 
-.PHONY: run relaunch relaunch_release hard_reset clean seed
+.PHONY: run test relaunch relaunch_release hard_reset clean seed
 
 define make_bundle
 	rm -rf $(APP_BUNDLE)
@@ -21,6 +21,9 @@ endef
 run:
 	swift build $(DEV_FLAGS)
 	.build/debug/$(APP_NAME)
+
+test:
+	swift test
 
 relaunch:
 	swift build -c release $(DEV_FLAGS)
