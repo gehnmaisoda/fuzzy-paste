@@ -1413,6 +1413,25 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// コンテンツを事前入力してスニペットを追加し、タイトル入力にフォーカスする。
+    func addSnippetWithContent(_ content: SnippetContent) {
+        store.add(title: "", content: content)
+        // 検索・フィルターをクリアして新しいスニペットを表示
+        searchField.stringValue = ""
+        searchQuery = ""
+        activeTagFilters.removeAll()
+        suggestedTag = nil
+        suggestionLabel.isHidden = true
+        rebuildFilterBadges()
+        refilter()
+        tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        updateEditFields()
+        updateEmptyState()
+        showWindow()
+        makeFirstResponder(titleField)
+        titleField.selectText(nil)
+    }
+
     // MARK: - キーボード
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

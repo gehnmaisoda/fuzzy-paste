@@ -1,6 +1,78 @@
 import AppKit
 import FuzzyPasteCore
 
+// MARK: - スニペット保存用の星ボタン
+
+/// macOS ネイティブ風の inline action ボタン。
+/// 行ホバーで薄く表示 → ボタン自体をホバーで tint 変化。背景・影・スケールなし。
+@MainActor
+private final class StarButton: NSView {
+    var onClick: (() -> Void)?
+
+    private static let hitSize: CGFloat = 24
+    private static let iconPointSize: CGFloat = 12
+    private static let restingAlpha: CGFloat = 0.65
+
+    private let iconView = NSImageView()
+    private var trackingArea: NSTrackingArea?
+
+    override init(frame: NSRect) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        alphaValue = Self.restingAlpha
+
+        let config = NSImage.SymbolConfiguration(pointSize: Self.iconPointSize, weight: .regular)
+        iconView.image = NSImage(systemSymbolName: "star", accessibilityDescription: "スニペットに保存")?
+            .withSymbolConfiguration(config)
+        iconView.contentTintColor = .tertiaryLabelColor
+        iconView.imageScaling = .scaleNone
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(iconView)
+        NSLayoutConstraint.activate([
+            iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: Self.hitSize, height: Self.hitSize)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.1
+            animator().alphaValue = 1.0
+        }
+        iconView.contentTintColor = .controlAccentColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            animator().alphaValue = Self.restingAlpha
+        }
+        iconView.contentTintColor = .tertiaryLabelColor
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        alphaValue = 0.2
+        onClick?()
+    }
+}
+
 // MARK: - カスタム行ビュー（角丸セレクション + ホバーエフェクト）
 
 @MainActor
@@ -66,6 +138,8 @@ private final class NonFocusTableView: NSTableView {
     /// Shift/Cmd+Click 時にクリックされた行を通知するコールバック。
     /// SearchWindow が orderedSelection を自前管理するために使用。
     var onMultiSelectClick: ((Int) -> Void)?
+    /// ホバー行が変化したときのコールバック。-1 はホバー解除。
+    var onHoverChanged: ((Int) -> Void)?
 
     private var hoveredRow: Int = -1
     private var hoverTrackingArea: NSTrackingArea?
@@ -108,6 +182,7 @@ private final class NonFocusTableView: NSTableView {
            let newRow = rowView(atRow: row, makeIfNecessary: false) as? ModernRowView {
             newRow.isHovered = true
         }
+        onHoverChanged?(row)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -120,7 +195,9 @@ private final class NonFocusTableView: NSTableView {
            let oldRow = rowView(atRow: hoveredRow, makeIfNecessary: false) as? ModernRowView {
             oldRow.isHovered = false
         }
+        let oldHovered = hoveredRow
         hoveredRow = -1
+        if oldHovered >= 0 { onHoverChanged?(-1) }
     }
 }
 
@@ -148,6 +225,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         static let c: UInt16 = 8
         static let a: UInt16 = 0
         static let e: UInt16 = 14
+        static let s: UInt16 = 1
         static let comma: UInt16 = 43
         static let space: UInt16 = 49
     }
@@ -174,6 +252,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     private static let imageSubtitleTag = 101
     private static let fileTitleTag = 300
     private static let fileSubtitleTag = 301
+    private static let starButtonID = NSUserInterfaceItemIdentifier("StarButton")
 
     // MARK: - プロパティ
 
@@ -233,6 +312,8 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     var onOpenPreferences: (() -> Void)?
     /// 動的スニペット（プレースホルダー付き）選択時のコールバック
     var onDynamicSnippetPaste: ((SnippetItem, NSRunningApplication?) -> Void)?
+    /// 選択中のクリップアイテムをスニペットとして保存するコールバック
+    var onSaveAsSnippet: ((SnippetContent) -> Void)?
 
     init(layout: LayoutConfig = .preset(.medium)) {
         self.layout = layout
@@ -366,6 +447,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         tableView.setDraggingSourceOperationMask(.copy, forLocal: false)
         tableView.onMultiSelectClick = { [weak self] row in
             self?.toggleMultiSelect(row: row)
+        }
+        tableView.onHoverChanged = { [weak self] row in
+            self?.updateStarButton(hoveredRow: row)
         }
 
         scrollView.documentView = tableView
@@ -749,6 +833,12 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             return true
         }
 
+        // Cmd+S → 選択中のクリップアイテムをスニペットとして保存
+        if event.keyCode == KeyCode.s && flags == .command {
+            saveCurrentItemAsSnippet()
+            return true
+        }
+
         // Cmd+E → スニペット管理ウィンドウを開く
         // resignKey → dismiss で previousApp?.activate() が走らないよう先に nil にする
         if event.keyCode == KeyCode.e && flags == .command {
@@ -1081,6 +1171,7 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 cellView = makeSnippetFileCell(tableView: tableView, snippet: snippetItem, meta: meta)
             }
         }
+        configureStarButton(in: cellView, row: row)
         configureSelectionBadge(in: cellView, row: row)
         return cellView
     }
@@ -1566,6 +1657,26 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         onCopy?(clipItem)
     }
 
+    /// 選択中のクリップアイテムをスニペットとして保存する。
+    private func saveCurrentItemAsSnippet() {
+        let row = tableView.selectedRow
+        guard let content = snippetContentForClip(at: row) else { return }
+        previousApp = nil
+        orderOut(nil)
+        onSaveAsSnippet?(content)
+    }
+
+    /// 指定行がクリップアイテムなら SnippetContent に変換して返す。スニペット行は nil。
+    private func snippetContentForClip(at row: Int) -> SnippetContent? {
+        guard row >= 0, row < filteredItems.count,
+              case .clip(let clipItem) = filteredItems[row] else { return nil }
+        switch clipItem.content {
+        case .text(let text): return .text(text)
+        case .image(let meta): return .image(meta)
+        case .file(let meta): return .file(meta)
+        }
+    }
+
     private func moveSelection(by delta: Int) {
         guard !filteredItems.isEmpty else { return }
         let baseRow = orderedSelection.last ?? tableView.selectedRow
@@ -1763,6 +1874,59 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 }
             }
         }
+    }
+
+    // MARK: - Star button (スニペット保存)
+
+    /// ホバー中の行だけ星ボタンを表示し、他の行は非表示にする。
+    private func updateStarButton(hoveredRow: Int) {
+        tableView.enumerateAvailableRowViews { rowView, row in
+            for col in 0..<rowView.numberOfColumns {
+                if let cellView = rowView.view(atColumn: col) as? NSView,
+                   let star = cellView.subviews.first(where: { $0.identifier == Self.starButtonID }) as? StarButton {
+                    star.isHidden = row != hoveredRow
+                }
+            }
+        }
+    }
+
+    /// セルにスニペット保存用の星ボタンを配置する。クリップアイテムのみ表示。
+    private func configureStarButton(in cellView: NSView, row: Int) {
+        // スニペットには星ボタンを表示しない
+        guard row >= 0, row < filteredItems.count,
+              case .clip = filteredItems[row] else {
+            if let existing = cellView.subviews.first(where: { $0.identifier == Self.starButtonID }) as? StarButton {
+                existing.isHidden = true
+            }
+            return
+        }
+
+        let star: StarButton
+        if let existing = cellView.subviews.first(where: { $0.identifier == Self.starButtonID }) as? StarButton {
+            star = existing
+        } else {
+            star = StarButton()
+            star.identifier = Self.starButtonID
+            star.translatesAutoresizingMaskIntoConstraints = false
+            cellView.addSubview(star)
+            NSLayoutConstraint.activate([
+                star.trailingAnchor.constraint(equalTo: cellView.trailingAnchor, constant: -layout.cellPadding),
+                star.centerYAnchor.constraint(equalTo: cellView.centerYAnchor),
+                star.widthAnchor.constraint(equalToConstant: 24),
+                star.heightAnchor.constraint(equalToConstant: 24),
+            ])
+        }
+        // cellView を weak キャプチャして retain cycle を防ぐ
+        // (cellView → star[subview] → onClick → cellView の循環を回避)
+        star.onClick = { [weak self, weak cellView] in
+            guard let self, let cellView else { return }
+            let row = self.tableView.row(for: cellView)
+            guard let content = self.snippetContentForClip(at: row) else { return }
+            self.previousApp = nil
+            self.orderOut(nil)
+            self.onSaveAsSnippet?(content)
+        }
+        star.isHidden = true  // デフォルトは非表示、ホバー時に表示
     }
 
     // MARK: - Helpers
