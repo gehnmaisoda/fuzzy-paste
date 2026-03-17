@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeMaxHistoryCount()
         observeHotkeyConfig()
         startFileWatchers()
+        backfillOCR()
     }
 
     // MARK: - ストア初期化
@@ -74,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .imageData(let data, let utType, let originalFileName):
                 if let metadata = self.imageStore.save(data: data, utType: utType, originalFileName: originalFileName) {
                     self.historyStore.addImage(metadata)
+                    self.runOCR(for: metadata)
                 }
             case .fileData(let data, let originalFileName):
                 if let metadata = self.fileStore.save(data: data, originalFileName: originalFileName) {
@@ -344,6 +346,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // 自分の save による変更は無視
                 if Date().timeIntervalSince(target.lastSave) > 1 {
                     target.reload()
+                }
+            }
+        }
+    }
+
+    // MARK: - OCR
+
+    /// 画像に対してバックグラウンドで OCR を実行し、結果を HistoryStore に保存する。
+    private func runOCR(for metadata: ImageMetadata) {
+        let imageURL = imageStore.imageURL(for: metadata.fileName)
+        let fileName = metadata.fileName
+        Task.detached {
+            guard let text = await OCRService.recognizeText(from: imageURL) else { return }
+            await MainActor.run { [weak self] in
+                self?.historyStore.updateOCRText(text, forImageFileName: fileName)
+            }
+        }
+    }
+
+    /// 起動時に ocrText が未設定の画像に対してバックグラウンドで OCR をバックフィルする。
+    private func backfillOCR() {
+        let pending = historyStore.items.compactMap { item -> ImageMetadata? in
+            guard case .image(let meta) = item.content, meta.ocrText == nil else { return nil }
+            return meta
+        }
+        guard !pending.isEmpty else { return }
+        let imageStore = self.imageStore
+        let fileNames = pending.map(\.fileName)
+        let imageURLs = fileNames.map { imageStore.imageURL(for: $0) }
+        Task.detached {
+            for (fileName, url) in zip(fileNames, imageURLs) {
+                guard let text = await OCRService.recognizeText(from: url) else { continue }
+                await MainActor.run { [weak self] in
+                    self?.historyStore.updateOCRText(text, forImageFileName: fileName)
                 }
             }
         }

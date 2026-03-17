@@ -1189,10 +1189,64 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
         thumbView.image = imageStore?.thumbnail(for: meta.fileName)
         titleLabel.stringValue = meta.originalFileName ?? ""
 
-        let sizeStr = formatFileSize(meta.fileSizeBytes)
-        subtitleLabel.stringValue = "\(meta.pixelWidth)×\(meta.pixelHeight)  \(sizeStr)"
+        let query = searchField.stringValue
+        if !query.isEmpty,
+           let ocr = meta.ocrText,
+           let best = FuzzyMatcher.bestMatchingLine(query: query, target: ocr) {
+            subtitleLabel.attributedStringValue = ocrHighlightedLine(best.line, matchPositions: best.positions, font: subtitleLabel.font!)
+        } else {
+            let sizeStr = formatFileSize(meta.fileSizeBytes)
+            subtitleLabel.attributedStringValue = NSAttributedString(string: "\(meta.pixelWidth)×\(meta.pixelHeight)  \(sizeStr)")
+        }
 
         return cellView
+    }
+
+    /// マッチした行をハイライト付きで返す。行が長い場合はマッチ周辺を抜粋する。
+    private func ocrHighlightedLine(_ line: String, matchPositions: [Int], font: NSFont, maxLength: Int = 60) -> NSAttributedString {
+        let chars = Array(line)
+
+        // 行が短ければそのまま、長ければマッチ周辺を抜き出す
+        let displayText: String
+        let offset: Int  // displayText 内の位置 = 元位置 + offset
+        if chars.count <= maxLength {
+            displayText = line
+            offset = 0
+        } else {
+            guard let firstPos = matchPositions.first, let lastPos = matchPositions.last else {
+                return NSAttributedString(string: String(line.prefix(maxLength)) + "…")
+            }
+            let center = (firstPos + lastPos) / 2
+            var start = max(0, center - maxLength / 2)
+            var end = min(chars.count, start + maxLength)
+            if firstPos < start { start = max(0, firstPos - 3) }
+            if lastPos >= end { end = min(chars.count, lastPos + 4) }
+            let prefix = start > 0 ? "…" : ""
+            let suffix = end < chars.count ? "…" : ""
+            displayText = prefix + String(chars[start..<end]) + suffix
+            offset = prefix.count - start
+        }
+
+        let baseAttrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        let result = NSMutableAttributedString(string: displayText, attributes: baseAttrs)
+
+        let highlightAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.controlAccentColor,
+            .font: NSFont.systemFont(ofSize: font.pointSize, weight: .bold),
+        ]
+        for pos in matchPositions {
+            let idx = pos + offset
+            guard idx >= 0, idx < displayText.count else { continue }
+            let strStart = displayText.index(displayText.startIndex, offsetBy: idx)
+            let strEnd = displayText.index(after: strStart)
+            let nsRange = NSRange(strStart..<strEnd, in: displayText)
+            result.addAttributes(highlightAttrs, range: nsRange)
+        }
+
+        return result
     }
 
     /// ファイルアイテム用セル（2行レイアウト）:
