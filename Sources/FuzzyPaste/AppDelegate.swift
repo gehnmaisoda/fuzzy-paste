@@ -240,6 +240,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onOpenSnippetManager = { [weak self] in
             self?.showSnippetManager()
         }
+        window.onSaveAsSnippet = { [weak self] content in
+            self?.saveAsSnippet(content: content)
+        }
         window.onOpenPreferences = { [weak self] in
             self?.showPreferences()
         }
@@ -282,16 +285,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - スニペット管理
 
-    private func showSnippetManager() {
-        // オンボーディング未完了 → オンボーディングを表示
+    /// SnippetManagerWindow を取得（なければ生成）。オンボーディング未完了なら nil。
+    private func ensureSnippetManager() -> SnippetManagerWindow? {
         if !preferencesStore.hasCompletedOnboarding {
             showOnboarding()
-            return
+            return nil
         }
-
         let window = snippetManagerWindow ?? SnippetManagerWindow(store: snippetStore, imageStore: imageStore, fileStore: fileStore)
         snippetManagerWindow = window
-        window.showWindow()
+        return window
+    }
+
+    private func saveAsSnippet(content: SnippetContent) {
+        ensureSnippetManager()?.addSnippetWithContent(content)
+    }
+
+    private func showSnippetManager() {
+        ensureSnippetManager()?.showWindow()
     }
 
     @objc private func menuShowSnippetManager() {
