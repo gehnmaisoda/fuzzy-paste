@@ -107,4 +107,74 @@ struct PlaceholderParserResolveTests {
         let result = PlaceholderParser.resolve(template: template, values: [:])
         #expect(result == template)
     }
+
+    @Test("Resolves choice placeholder by name")
+    func resolveChoicePlaceholder() {
+        let result = PlaceholderParser.resolve(
+            template: "OS: {{OS|macOS,Windows,Linux}}",
+            values: ["OS": "macOS"]
+        )
+        #expect(result == "OS: macOS")
+    }
+
+    @Test("Resolves mixed free-text and choice placeholders")
+    func resolveMixed() {
+        let result = PlaceholderParser.resolve(
+            template: "{{name}} uses {{OS|macOS,Windows}}",
+            values: ["name": "Alice", "OS": "Windows"]
+        )
+        #expect(result == "Alice uses Windows")
+    }
+}
+
+// MARK: - extractPlaceholders (with options)
+
+struct PlaceholderParserChoiceTests {
+    @Test("Extracts choice options from placeholder")
+    func extractsOptions() {
+        let placeholders = PlaceholderParser.extractPlaceholders(from: "{{OS|macOS,Windows,Linux}}")
+        #expect(placeholders.count == 1)
+        #expect(placeholders[0].name == "OS")
+        #expect(placeholders[0].options == ["macOS", "Windows", "Linux"])
+    }
+
+    @Test("Free-text placeholder has nil options")
+    func freeTextHasNilOptions() {
+        let placeholders = PlaceholderParser.extractPlaceholders(from: "{{name}}")
+        #expect(placeholders.count == 1)
+        #expect(placeholders[0].name == "name")
+        #expect(placeholders[0].options == nil)
+    }
+
+    @Test("Mixed free-text and choice placeholders")
+    func mixedTypes() {
+        let placeholders = PlaceholderParser.extractPlaceholders(from: "{{name}} {{OS|macOS,Windows}}")
+        #expect(placeholders.count == 2)
+        #expect(placeholders[0].options == nil)
+        #expect(placeholders[1].options == ["macOS", "Windows"])
+    }
+
+    @Test("Trims whitespace around options")
+    func trimsOptionWhitespace() {
+        let placeholders = PlaceholderParser.extractPlaceholders(from: "{{size| S , M , L }}")
+        #expect(placeholders[0].options == ["S", "M", "L"])
+    }
+
+    @Test("extractPlaceholderNames still works with choice syntax")
+    func namesBackwardCompatible() {
+        let names = PlaceholderParser.extractPlaceholderNames(from: "{{OS|macOS,Windows}} and {{name}}")
+        #expect(names == ["OS", "name"])
+    }
+
+    @Test("Deduplicates choice placeholders by name")
+    func deduplicatesChoices() {
+        let placeholders = PlaceholderParser.extractPlaceholders(from: "{{x|a,b}} {{x|a,b}}")
+        #expect(placeholders.count == 1)
+    }
+
+    @Test("rawToken preserves original syntax for resolve")
+    func rawTokenPreserved() {
+        let placeholders = PlaceholderParser.extractPlaceholders(from: "{{OS|macOS,Windows}}")
+        #expect(placeholders[0].rawToken == "{{OS|macOS,Windows}}")
+    }
 }

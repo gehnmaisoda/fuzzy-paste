@@ -259,10 +259,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showDynamicSnippetDialog(snippet: SnippetItem, previousApp: NSRunningApplication?) {
         guard let text = snippet.text else { return }
-        let names = PlaceholderParser.extractPlaceholderNames(from: text)
-        guard !names.isEmpty else { return }
+        let placeholders = PlaceholderParser.extractPlaceholders(from: text)
+        guard !placeholders.isEmpty else { return }
 
-        let window = DynamicSnippetWindow(snippet: snippet, placeholderNames: names)
+        let window = DynamicSnippetWindow(snippet: snippet, placeholders: placeholders)
         window.onPaste = { [weak self] resolvedText in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()

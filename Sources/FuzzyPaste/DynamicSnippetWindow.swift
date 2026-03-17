@@ -3,11 +3,15 @@ import FuzzyPasteCore
 
 /// 動的スニペットのプレースホルダーに値を入力するモーダルダイアログ。
 /// 左ペイン: ヘッダー + 入力フィールド、右ペイン: リアルタイムプレビュー の2面構成。
+/// 選択肢付きプレースホルダー `{{名前|A,B,C}}` はドロップダウンで表示する。
 @MainActor
 final class DynamicSnippetWindow: NSPanel {
     private let snippet: SnippetItem
-    private let placeholderNames: [String]
+    private let placeholders: [PlaceholderParser.Placeholder]
+    /// 自由入力フィールド（名前 → NSTextField）
     private var inputFields: [String: NSTextField] = [:]
+    /// 選択肢ドロップダウン（名前 → NSPopUpButton）
+    private var popUpButtons: [String: NSPopUpButton] = [:]
     private let previewTextView = NSTextView()
 
     var onPaste: ((String) -> Void)?
@@ -36,9 +40,9 @@ final class DynamicSnippetWindow: NSPanel {
         static let panelSplitRatio: CGFloat = 0.45 // 左ペインの幅割合
     }
 
-    init(snippet: SnippetItem, placeholderNames: [String]) {
+    init(snippet: SnippetItem, placeholders: [PlaceholderParser.Placeholder]) {
         self.snippet = snippet
-        self.placeholderNames = placeholderNames
+        self.placeholders = placeholders
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: Design.windowWidth, height: Design.windowHeight),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
@@ -189,8 +193,8 @@ final class DynamicSnippetWindow: NSPanel {
         stack.addArrangedSubview(fieldsStack)
         fieldsStack.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        for name in placeholderNames {
-            let group = makeFieldGroup(name: name)
+        for placeholder in placeholders {
+            let group = makeFieldGroup(placeholder: placeholder)
             fieldsStack.addArrangedSubview(group)
             group.widthAnchor.constraint(equalTo: fieldsStack.widthAnchor).isActive = true
         }
@@ -278,7 +282,7 @@ final class DynamicSnippetWindow: NSPanel {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(titleLabel)
 
-        let subtitleLabel = NSTextField(labelWithString: "\(placeholderNames.count) 個の入力項目")
+        let subtitleLabel = NSTextField(labelWithString: "\(placeholders.count) 個の入力項目")
         subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
         subtitleLabel.textColor = .tertiaryLabelColor
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -302,56 +306,72 @@ final class DynamicSnippetWindow: NSPanel {
         return container
     }
 
-    private func makeFieldGroup(name: String) -> NSView {
+    /// プレースホルダーの種類に応じて NSTextField（自由入力）または NSPopUpButton（選択肢）を生成する。
+    private func makeFieldGroup(placeholder: PlaceholderParser.Placeholder) -> NSView {
         let group = NSStackView()
         group.orientation = .vertical
         group.alignment = .leading
         group.spacing = Design.fieldSpacing
         group.translatesAutoresizingMaskIntoConstraints = false
 
-        let label = NSTextField(labelWithString: name)
+        let label = NSTextField(labelWithString: placeholder.name)
         label.font = .systemFont(ofSize: Design.labelFontSize, weight: .medium)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         group.addArrangedSubview(label)
 
-        let fieldContainer = NSView()
-        fieldContainer.wantsLayer = true
-        fieldContainer.layer?.cornerRadius = Design.fieldCornerRadius
-        fieldContainer.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
-        fieldContainer.layer?.borderWidth = 0.5
-        fieldContainer.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
-        fieldContainer.translatesAutoresizingMaskIntoConstraints = false
+        if let options = placeholder.options {
+            // 選択肢付き → NSPopUpButton
+            let popUp = NSPopUpButton(frame: .zero, pullsDown: false)
+            popUp.addItems(withTitles: options)
+            popUp.font = .systemFont(ofSize: Design.fieldFontSize)
+            popUp.translatesAutoresizingMaskIntoConstraints = false
+            popUp.target = self
+            popUp.action = #selector(popUpSelectionChanged(_:))
+            group.addArrangedSubview(popUp)
+            popUp.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+            popUp.heightAnchor.constraint(equalToConstant: Design.fieldHeight).isActive = true
+            popUpButtons[placeholder.name] = popUp
+        } else {
+            // 自由入力 → NSTextField
+            let fieldContainer = NSView()
+            fieldContainer.wantsLayer = true
+            fieldContainer.layer?.cornerRadius = Design.fieldCornerRadius
+            fieldContainer.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
+            fieldContainer.layer?.borderWidth = 0.5
+            fieldContainer.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
+            fieldContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        let field = NSTextField()
-        field.font = .systemFont(ofSize: Design.fieldFontSize)
-        field.focusRingType = .none
-        field.isBordered = false
-        field.drawsBackground = false
-        field.placeholderString = "\(name) を入力..."
-        field.target = self
-        field.action = #selector(handlePaste)
-        field.translatesAutoresizingMaskIntoConstraints = false
-        fieldContainer.addSubview(field)
+            let field = NSTextField()
+            field.font = .systemFont(ofSize: Design.fieldFontSize)
+            field.focusRingType = .none
+            field.isBordered = false
+            field.drawsBackground = false
+            field.placeholderString = "\(placeholder.name) を入力..."
+            field.target = self
+            field.action = #selector(handlePaste)
+            field.translatesAutoresizingMaskIntoConstraints = false
+            fieldContainer.addSubview(field)
 
-        NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: fieldContainer.leadingAnchor, constant: 10),
-            field.trailingAnchor.constraint(equalTo: fieldContainer.trailingAnchor, constant: -10),
-            field.centerYAnchor.constraint(equalTo: fieldContainer.centerYAnchor),
-        ])
+            NSLayoutConstraint.activate([
+                field.leadingAnchor.constraint(equalTo: fieldContainer.leadingAnchor, constant: 10),
+                field.trailingAnchor.constraint(equalTo: fieldContainer.trailingAnchor, constant: -10),
+                field.centerYAnchor.constraint(equalTo: fieldContainer.centerYAnchor),
+            ])
 
-        group.addArrangedSubview(fieldContainer)
-        fieldContainer.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
-        fieldContainer.heightAnchor.constraint(equalToConstant: Design.fieldHeight).isActive = true
+            group.addArrangedSubview(fieldContainer)
+            fieldContainer.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+            fieldContainer.heightAnchor.constraint(equalToConstant: Design.fieldHeight).isActive = true
 
-        inputFields[name] = field
+            inputFields[placeholder.name] = field
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(textDidChangeNotification(_:)),
-            name: NSControl.textDidChangeNotification,
-            object: field
-        )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(textDidChangeNotification(_:)),
+                name: NSControl.textDidChangeNotification,
+                object: field
+            )
+        }
 
         return group
     }
@@ -453,18 +473,28 @@ final class DynamicSnippetWindow: NSPanel {
         updatePreview()
     }
 
+    @objc private func popUpSelectionChanged(_ sender: NSPopUpButton) {
+        updatePreview()
+    }
+
     private func updatePreview() {
         let values = currentValues()
         let resolved = PlaceholderParser.resolve(template: snippet.text ?? "", values: values)
         previewTextView.string = resolved
     }
 
+    /// 自由入力フィールドと選択肢ドロップダウンの両方から現在の値を収集する。
     private func currentValues() -> [String: String] {
         var values: [String: String] = [:]
         for (name, field) in inputFields {
             let text = field.stringValue
             if !text.isEmpty {
                 values[name] = text
+            }
+        }
+        for (name, popUp) in popUpButtons {
+            if let title = popUp.selectedItem?.title {
+                values[name] = title
             }
         }
         return values
@@ -501,7 +531,9 @@ final class DynamicSnippetWindow: NSPanel {
         let y = screenFrame.midY - windowSize.height / 2
         setFrameOrigin(NSPoint(x: x, y: y))
         makeKeyAndOrderFront(nil)
-        if let firstName = placeholderNames.first, let field = inputFields[firstName] {
+        // 最初のフィールドにフォーカス（テキストフィールドを優先）
+        if let firstTextField = placeholders.first(where: { $0.options == nil }),
+           let field = inputFields[firstTextField.name] {
             makeFirstResponder(field)
         }
     }
