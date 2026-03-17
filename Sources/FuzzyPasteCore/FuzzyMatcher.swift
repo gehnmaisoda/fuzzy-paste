@@ -39,15 +39,34 @@ public enum FuzzyMatcher {
         return score
     }
 
+    // MARK: - Frecency
+
+    /// frecency スコアを計算する。使用回数と最終使用日時から算出。
+    /// 半減期 72 時間で連続減衰する。
+    public static func frecencyScore(useCount: Int, lastUsedAt: Date?, now: Date = Date()) -> Double {
+        guard useCount > 0, let lastUsed = lastUsedAt else { return 0 }
+        let hoursSinceLastUse = max(0, now.timeIntervalSince(lastUsed) / 3600)
+        let decayFactor = pow(0.5, hoursSinceLastUse / 72.0)
+        return Double(useCount) * decayFactor
+    }
+
+    /// frecency スコアの重み（fuzzy スコアに対する比率）
+    private static let frecencyWeight: Double = 0.5
+
+    /// fuzzy スコアと frecency スコアを合成する。
+    private static func combinedScore(fuzzy: Int, clip: ClipItem) -> Double {
+        Double(fuzzy) + frecencyWeight * frecencyScore(useCount: clip.useCount, lastUsedAt: clip.lastUsedAt)
+    }
+
     /// クエリでアイテム一覧をフィルタリングし、スコア降順でソートして返す。
     /// クエリが空の場合は全件をそのまま返す。
     public static func filter(query: String, items: [ClipItem]) -> [ClipItem] {
         if query.isEmpty { return items }
         return items
-            .compactMap { item -> (item: ClipItem, score: Int)? in
+            .compactMap { item -> (item: ClipItem, score: Double)? in
                 guard let text = item.text,
-                      let score = match(query: query, target: text) else { return nil }
-                return (item, score)
+                      let fuzzy = match(query: query, target: text) else { return nil }
+                return (item, combinedScore(fuzzy: fuzzy, clip: item))
             }
             .sorted { $0.score > $1.score }
             .map(\.item)
@@ -67,10 +86,10 @@ public enum FuzzyMatcher {
             if query.isEmpty {
                 return filtered.map { .snippet($0) }
             }
-            var scored: [(item: SearchResultItem, score: Int)] = []
+            var scored: [(item: SearchResultItem, score: Double)] = []
             for snippet in filtered {
                 let best = bestSnippetScore(query: query, snippet: snippet)
-                if let s = best { scored.append((.snippet(snippet), s)) }
+                if let s = best { scored.append((.snippet(snippet), Double(s))) }
             }
             return scored.sorted { $0.score > $1.score }.map(\.item)
         }
@@ -79,13 +98,13 @@ public enum FuzzyMatcher {
             return clips.map { SearchResultItem.clip($0) }
         }
 
-        var scored: [(item: SearchResultItem, score: Int)] = []
+        var scored: [(item: SearchResultItem, score: Double)] = []
 
         for clip in clips {
             switch clip.content {
             case .text(let text):
                 if let score = match(query: query, target: text) {
-                    scored.append((.clip(clip), score))
+                    scored.append((.clip(clip), combinedScore(fuzzy: score, clip: clip)))
                 }
             case .image(let meta):
                 // 画像は originalFileName と ocrText（行単位）を検索対象にする
@@ -99,18 +118,18 @@ public enum FuzzyMatcher {
                     bestScore = max(bestScore ?? 0, s)
                 }
                 if let s = bestScore {
-                    scored.append((.clip(clip), s))
+                    scored.append((.clip(clip), combinedScore(fuzzy: s, clip: clip)))
                 }
             case .file(let meta):
                 if let score = match(query: query, target: meta.originalFileName) {
-                    scored.append((.clip(clip), score))
+                    scored.append((.clip(clip), combinedScore(fuzzy: score, clip: clip)))
                 }
             }
         }
 
         for snippet in activeSnippets {
             if let bestScore = bestSnippetScore(query: query, snippet: snippet) {
-                scored.append((.snippet(snippet), bestScore))
+                scored.append((.snippet(snippet), Double(bestScore)))
             }
         }
 

@@ -28,5 +28,10 @@ let package = Package(
             ],
             path: "Sources/fpaste"
         ),
+        .testTarget(
+            name: "FuzzyPasteCoreTests",
+            dependencies: ["FuzzyPasteCore"],
+            path: "Tests/FuzzyPasteCoreTests"
+        ),
     ]
 )
