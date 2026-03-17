@@ -9,14 +9,17 @@ public struct ImageMetadata: Codable, Sendable, Equatable {
     public let pixelWidth: Int
     public let pixelHeight: Int
     public let fileSizeBytes: Int64
+    /// OCR で抽出されたテキスト。未実行または検出なしなら nil。
+    public var ocrText: String?
 
-    public init(fileName: String, originalUTType: String, originalFileName: String?, pixelWidth: Int, pixelHeight: Int, fileSizeBytes: Int64) {
+    public init(fileName: String, originalUTType: String, originalFileName: String?, pixelWidth: Int, pixelHeight: Int, fileSizeBytes: Int64, ocrText: String? = nil) {
         self.fileName = fileName
         self.originalUTType = originalUTType
         self.originalFileName = originalFileName
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.fileSizeBytes = fileSizeBytes
+        self.ocrText = ocrText
     }
 }
 
@@ -72,6 +75,13 @@ public struct ClipItem: Codable, Identifiable, Sendable {
         self.copiedAt = Date()
     }
 
+    /// 既存アイテムの内容を置き換えて再構築する。OCR テキスト更新等で使用。
+    init(id: UUID, content: ClipContent, copiedAt: Date) {
+        self.id = id
+        self.content = content
+        self.copiedAt = copiedAt
+    }
+
     /// テキストコンテンツを返す。画像・ファイルの場合は nil。
     public var text: String? {
         if case .text(let string) = content { return string }
@@ -121,6 +131,18 @@ public final class HistoryStore {
     public func addFile(_ metadata: FileMetadata) {
         items.insert(ClipItem(fileMetadata: metadata), at: 0)
         trimAndSave()
+    }
+
+    /// 指定した画像アイテムの OCR テキストを更新して保存する。
+    public func updateOCRText(_ text: String, forImageFileName fileName: String) {
+        guard let index = items.firstIndex(where: {
+            if case .image(let meta) = $0.content { return meta.fileName == fileName }
+            return false
+        }) else { return }
+        guard case .image(var meta) = items[index].content else { return }
+        meta.ocrText = text
+        items[index] = ClipItem(id: items[index].id, content: .image(meta), copiedAt: items[index].copiedAt)
+        save()
     }
 
     /// 最大件数を変更し、超過分があればトリムして保存。

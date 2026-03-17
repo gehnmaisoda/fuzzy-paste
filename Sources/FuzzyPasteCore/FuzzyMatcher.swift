@@ -88,10 +88,18 @@ public enum FuzzyMatcher {
                     scored.append((.clip(clip), score))
                 }
             case .image(let meta):
-                // 画像は originalFileName があれば検索対象にする
+                // 画像は originalFileName と ocrText（行単位）を検索対象にする
+                var bestScore: Int?
                 if let name = meta.originalFileName,
-                   let score = match(query: query, target: name) {
-                    scored.append((.clip(clip), score))
+                   let s = match(query: query, target: name) {
+                    bestScore = s
+                }
+                if let ocr = meta.ocrText,
+                   let s = matchLines(query: query, target: ocr) {
+                    bestScore = max(bestScore ?? 0, s)
+                }
+                if let s = bestScore {
+                    scored.append((.clip(clip), s))
                 }
             case .file(let meta):
                 if let score = match(query: query, target: meta.originalFileName) {
@@ -152,6 +160,49 @@ public enum FuzzyMatcher {
         return positions
     }
 
+    /// OCR テキストを行単位で fuzzy match し、最もスコアの高い行のスコアを返す。
+    /// 長いテキスト全体に対する fuzzy match だと文字がバラバラにヒットするため、
+    /// 行単位でマッチさせることで "updateFilter" のような単語検索を正確にする。
+    public static func matchLines(query: String, target: String) -> Int? {
+        target.components(separatedBy: "\n")
+            .compactMap { match(query: query, target: $0) }
+            .max()
+    }
+
+    /// OCR テキストを行単位で fuzzy match し、最もスコアの高い行とそのマッチ位置を返す。
+    /// ハイライト表示用。
+    public static func bestMatchingLine(query: String, target: String) -> (line: String, positions: [Int])? {
+        var bestLine: String?
+        var bestPositions: [Int]?
+        var bestScore = -1
+        for line in target.components(separatedBy: "\n") {
+            guard let positions = matchPositions(query: query, target: line) else { continue }
+            // matchPositions が成功 = マッチ確定。連続一致ボーナスからスコアを計算。
+            let score = consecutiveScore(positions)
+            if score > bestScore {
+                bestScore = score
+                bestLine = line
+                bestPositions = positions
+            }
+        }
+        guard let line = bestLine, let positions = bestPositions else { return nil }
+        return (line, positions)
+    }
+
+    /// マッチ位置列から連続一致ボーナスのスコアを計算する。
+    /// match() と同じスコアリングロジック。
+    private static func consecutiveScore(_ positions: [Int]) -> Int {
+        var score = 0
+        var consecutive = 0
+        var prev = -2
+        for pos in positions {
+            consecutive = (pos == prev + 1) ? consecutive + 1 : 1
+            score += consecutive
+            prev = pos
+        }
+        return score
+    }
+
     /// スニペットのタイトルマッチに加算するボーナス倍率。
     /// クエリ長 × この値を加算し、スニペットが優先的にヒットするようにする。
     private static let snippetTitleBonus = 3
@@ -169,6 +220,9 @@ public enum FuzzyMatcher {
         case .image(let meta):
             if let name = meta.originalFileName {
                 scores.append(match(query: query, target: name))
+            }
+            if let ocr = meta.ocrText {
+                scores.append(matchLines(query: query, target: ocr))
             }
         case .file(let meta):
             scores.append(match(query: query, target: meta.originalFileName))
