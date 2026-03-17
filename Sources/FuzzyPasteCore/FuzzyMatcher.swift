@@ -221,9 +221,6 @@ public enum FuzzyMatcher {
             if let name = meta.originalFileName {
                 scores.append(match(query: query, target: name))
             }
-            if let ocr = meta.ocrText {
-                scores.append(matchLines(query: query, target: ocr))
-            }
         case .file(let meta):
             scores.append(match(query: query, target: meta.originalFileName))
         }
