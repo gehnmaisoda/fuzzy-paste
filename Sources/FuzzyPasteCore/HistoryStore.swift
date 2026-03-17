@@ -10,6 +10,7 @@ public struct ImageMetadata: Codable, Sendable, Equatable {
     public let pixelHeight: Int
     public let fileSizeBytes: Int64
     /// OCR で抽出されたテキスト。未実行または検出なしなら nil。
+    /// クリップボード履歴の画像でのみ使用。スニペットではタイトル・タグで検索できるため OCR は行わない。
     public var ocrText: String?
 
     public init(fileName: String, originalUTType: String, originalFileName: String?, pixelWidth: Int, pixelHeight: Int, fileSizeBytes: Int64, ocrText: String? = nil) {

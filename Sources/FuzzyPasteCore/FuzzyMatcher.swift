@@ -218,6 +218,7 @@ public enum FuzzyMatcher {
         case .text(let text):
             scores.append(match(query: query, target: text))
         case .image(let meta):
+            // スニペットは OCR 検索しない（タイトル・タグで十分検索できるため）
             if let name = meta.originalFileName {
                 scores.append(match(query: query, target: name))
             }
