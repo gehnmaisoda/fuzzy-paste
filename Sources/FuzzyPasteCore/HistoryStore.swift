@@ -53,40 +53,67 @@ extension ClipContent: Codable {}
 
 /// クリップボード履歴の1エントリ。
 /// JSON で永続化するため Codable に準拠。
-public struct ClipItem: Codable, Identifiable, Sendable {
+public struct ClipItem: Identifiable, Sendable {
     public let id: UUID
     public let content: ClipContent
     public let copiedAt: Date
+    /// ペースト/コピーされた回数。frecency スコアの計算に使用。
+    public var useCount: Int
+    /// 最後にペースト/コピーされた日時。frecency スコアの減衰計算に使用。
+    public var lastUsedAt: Date?
 
     public init(text: String) {
         self.id = UUID()
         self.content = .text(text)
         self.copiedAt = Date()
+        self.useCount = 0
+        self.lastUsedAt = nil
     }
 
     public init(imageMetadata: ImageMetadata) {
         self.id = UUID()
         self.content = .image(imageMetadata)
         self.copiedAt = Date()
+        self.useCount = 0
+        self.lastUsedAt = nil
     }
 
     public init(fileMetadata: FileMetadata) {
         self.id = UUID()
         self.content = .file(fileMetadata)
         self.copiedAt = Date()
+        self.useCount = 0
+        self.lastUsedAt = nil
     }
 
     /// 既存アイテムの内容を置き換えて再構築する。OCR テキスト更新等で使用。
-    init(id: UUID, content: ClipContent, copiedAt: Date) {
+    init(id: UUID, content: ClipContent, copiedAt: Date, useCount: Int = 0, lastUsedAt: Date? = nil) {
         self.id = id
         self.content = content
         self.copiedAt = copiedAt
+        self.useCount = useCount
+        self.lastUsedAt = lastUsedAt
     }
 
     /// テキストコンテンツを返す。画像・ファイルの場合は nil。
     public var text: String? {
         if case .text(let string) = content { return string }
         return nil
+    }
+}
+
+extension ClipItem: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, content, copiedAt, useCount, lastUsedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        content = try container.decode(ClipContent.self, forKey: .content)
+        copiedAt = try container.decode(Date.self, forKey: .copiedAt)
+        useCount = try container.decodeIfPresent(Int.self, forKey: .useCount) ?? 0
+        lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
     }
 }
 
@@ -115,10 +142,17 @@ public final class HistoryStore {
 
     /// テキストアイテムを追加。同じテキストが既にあれば重複排除して先頭に移動。
     /// 空白・改行・タブのみのテキストは無視する。
+    /// 重複排除時は frecency データ（useCount / lastUsedAt）を引き継ぐ。
     public func add(_ text: String) {
         guard !text.allSatisfy(\.isWhitespace) else { return }
+        let existing = items.first { $0.text == text }
         items.removeAll { $0.text == text }
-        items.insert(ClipItem(text: text), at: 0)
+        var newItem = ClipItem(text: text)
+        if let existing {
+            newItem.useCount = existing.useCount
+            newItem.lastUsedAt = existing.lastUsedAt
+        }
+        items.insert(newItem, at: 0)
         trimAndSave()
     }
 
@@ -142,8 +176,28 @@ public final class HistoryStore {
         }) else { return }
         guard case .image(var meta) = items[index].content else { return }
         meta.ocrText = text
-        items[index] = ClipItem(id: items[index].id, content: .image(meta), copiedAt: items[index].copiedAt)
+        let old = items[index]
+        items[index] = ClipItem(id: old.id, content: .image(meta), copiedAt: old.copiedAt,
+                                useCount: old.useCount, lastUsedAt: old.lastUsedAt)
         save()
+    }
+
+    /// 使用回数と最終使用日時を更新する。ペースト/コピー時に呼ぶ。
+    public func recordUse(id: UUID) {
+        recordUses(ids: [id])
+    }
+
+    /// 複数アイテムの使用回数と最終使用日時を一括更新する。マルチペースト時に使用。
+    public func recordUses(ids: [UUID]) {
+        let idSet = Set(ids)
+        let now = Date()
+        var updated = false
+        for index in items.indices where idSet.contains(items[index].id) {
+            items[index].useCount += 1
+            items[index].lastUsedAt = now
+            updated = true
+        }
+        if updated { save() }
     }
 
     /// 最大件数を変更し、超過分があればトリムして保存。

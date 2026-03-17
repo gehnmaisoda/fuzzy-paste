@@ -201,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onPaste = { [weak self] item, previousApp in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()
+            self.historyStore.recordUse(id: item.id)
             switch item.content {
             case .text(let text):
                 PasteHelper.paste(text, previousApp: previousApp)
@@ -215,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onMultiPaste = { [weak self] items, previousApp in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()
+            self.historyStore.recordUses(ids: items.map(\.id))
             // テキストアイテムのみ抽出し、選択順に改行で結合してペースト
             let texts = items.compactMap { item -> String? in
                 if case .text(let text) = item.content { return text }
@@ -226,6 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onCopy = { [weak self] item in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()
+            self.historyStore.recordUse(id: item.id)
             switch item.content {
             case .text(let text):
                 PasteHelper.copyToClipboard(text)
