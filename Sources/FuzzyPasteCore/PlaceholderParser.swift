@@ -5,7 +5,7 @@ import Foundation
 ///
 /// 構文:
 /// - `{{名前}}` — 自由入力
-/// - `{{OS|macOS,Windows,Linux}}` — 選択肢付き（`|` の後にカンマ区切り）
+/// - `{{OS:macOS,Windows,Linux}}` — 選択肢付き（最初の `:` の後にカンマ区切り）
 public enum PlaceholderParser {
     private static let pattern = try! NSRegularExpression(pattern: #"\{\{([^}]+)\}\}"#)
 
@@ -14,7 +14,7 @@ public enum PlaceholderParser {
         public let name: String
         /// 選択肢。nil なら自由入力。
         public let options: [String]?
-        /// resolve 時に使うキー。`{{名前|選択肢}}` 全体を置換するために元の raw 文字列を保持。
+        /// resolve 時に使うキー。`{{名前:選択肢}}` 全体を置換するために元の raw 文字列を保持。
         public let rawToken: String
     }
 
@@ -30,7 +30,7 @@ public enum PlaceholderParser {
     }
 
     /// テンプレート文字列からプレースホルダー定義を出現順・一意（名前ベース）で抽出する。
-    /// `{{名前|選択肢1,選択肢2}}` 形式の場合、options に選択肢の配列が入る。
+    /// `{{名前:選択肢1,選択肢2}}` 形式の場合、options に選択肢の配列が入る。
     public static func extractPlaceholders(from template: String) -> [Placeholder] {
         let range = NSRange(template.startIndex..., in: template)
         let matches = pattern.matches(in: template, range: range)
@@ -50,7 +50,7 @@ public enum PlaceholderParser {
 
     /// テンプレート内のプレースホルダーを値で置換した文字列を返す。
     /// `values` に含まれないプレースホルダーはそのまま残す。
-    /// 選択肢付き `{{名前|選択肢}}` も rawToken ごと置換する。
+    /// 選択肢付き `{{名前:選択肢}}` も rawToken ごと置換する。
     public static func resolve(template: String, values: [String: String]) -> String {
         let placeholders = extractPlaceholders(from: template)
         var result = template
@@ -61,14 +61,14 @@ public enum PlaceholderParser {
         return result
     }
 
-    /// `名前|選択肢1,選択肢2` を (名前, options?) にパースする。
-    /// `|` がなければ options は nil。
+    /// `名前:選択肢1,選択肢2` を (名前, options?) にパースする。
+    /// 最初の `:` で分割する。`:` がなければ options は nil（自由入力）。
     private static func parseInner(_ inner: String) -> (name: String, options: [String]?) {
-        guard let pipeIndex = inner.firstIndex(of: "|") else {
+        guard let colonIndex = inner.firstIndex(of: ":") else {
             return (inner, nil)
         }
-        let name = String(inner[inner.startIndex..<pipeIndex])
-        let optionsStr = String(inner[inner.index(after: pipeIndex)...])
+        let name = String(inner[inner.startIndex..<colonIndex]).trimmingCharacters(in: .whitespaces)
+        let optionsStr = String(inner[inner.index(after: colonIndex)...])
         let options = optionsStr.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         return (name, options.isEmpty ? nil : options)
     }
