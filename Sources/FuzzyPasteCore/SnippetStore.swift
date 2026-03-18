@@ -8,6 +8,15 @@ public enum SnippetContent: Codable, Sendable, Equatable {
 }
 
 extension SnippetContent {
+    /// コンテンツ種別から自動付与されるタグ。テキストは空。
+    public var autoTags: [String] {
+        switch self {
+        case .text: return []
+        case .image: return [AutoTag.imageTag]
+        case .file(let meta): return AutoTag.tags(forExtension: meta.fileExtension)
+        }
+    }
+
     /// ファイル名マッピングを適用した新しい SnippetContent を返す。
     /// テキストの場合はそのまま返す。
     func remappingFileName(_ mapping: [String: String]) -> SnippetContent {
@@ -121,9 +130,9 @@ public final class SnippetStore {
         save()
     }
 
-    /// 全スニペットのタグを重複排除・ソートして返す
+    /// 全スニペットのタグ（ユーザータグ + autoTags）を重複排除・ソートして返す
     public var allTags: [String] {
-        Array(Set(items.flatMap(\.tags))).sorted()
+        Array(Set(items.flatMap { $0.tags + $0.content.autoTags })).sorted()
     }
 
     public func remove(id: UUID) {

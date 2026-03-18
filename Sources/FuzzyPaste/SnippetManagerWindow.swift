@@ -1659,6 +1659,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             noSelectionLabel.isHidden = true
             let item = filteredSnippets[row]
             titleField.stringValue = item.title
+            tagContainer.autoTags = item.content.autoTags
             tagContainer.tags = item.tags
             titleField.isEnabled = true
             removeButton.isEnabled = true
