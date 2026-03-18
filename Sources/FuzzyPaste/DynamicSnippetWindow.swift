@@ -42,6 +42,10 @@ final class DynamicSnippetWindow: NSPanel {
         static let fieldGroupSpacing: CGFloat = 14
         static let dividerWidth: CGFloat = 0.5
         static let panelSplitRatio: CGFloat = 0.45 // 左ペインの幅割合
+        static let borderWidth: CGFloat = 0.5
+        static let focusBorderWidth: CGFloat = 1.5
+        static let borderAlpha: CGFloat = 0.3
+        static let focusBorderAlpha: CGFloat = 0.6
     }
 
     init(snippet: SnippetItem, placeholders: [PlaceholderParser.Placeholder]) {
@@ -333,16 +337,11 @@ final class DynamicSnippetWindow: NSPanel {
         label.translatesAutoresizingMaskIntoConstraints = false
         group.addArrangedSubview(label)
 
+        let fieldContainer = makeFieldContainer()
+        let control: NSView
+
         if let options = placeholder.options {
             // 選択肢付き → テキストフィールドと統一されたスタイルのドロップダウン
-            let fieldContainer = NSView()
-            fieldContainer.wantsLayer = true
-            fieldContainer.layer?.cornerRadius = Design.fieldCornerRadius
-            fieldContainer.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
-            fieldContainer.layer?.borderWidth = 0.5
-            fieldContainer.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
-            fieldContainer.translatesAutoresizingMaskIntoConstraints = false
-
             let popUp = NSPopUpButton(frame: .zero, pullsDown: false)
             popUp.addItems(withTitles: options)
             popUp.font = .systemFont(ofSize: Design.fieldFontSize)
@@ -360,22 +359,10 @@ final class DynamicSnippetWindow: NSPanel {
                 popUp.centerYAnchor.constraint(equalTo: fieldContainer.centerYAnchor),
             ])
 
-            group.addArrangedSubview(fieldContainer)
-            fieldContainer.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
-            fieldContainer.heightAnchor.constraint(equalToConstant: Design.fieldHeight).isActive = true
             popUpButtons[placeholder.name] = popUp
-            orderedControls.append(popUp)
-            controlContainers[ObjectIdentifier(popUp)] = fieldContainer
+            control = popUp
         } else {
             // 自由入力 → NSTextField
-            let fieldContainer = NSView()
-            fieldContainer.wantsLayer = true
-            fieldContainer.layer?.cornerRadius = Design.fieldCornerRadius
-            fieldContainer.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
-            fieldContainer.layer?.borderWidth = 0.5
-            fieldContainer.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
-            fieldContainer.translatesAutoresizingMaskIntoConstraints = false
-
             let field = NSTextField()
             field.font = .systemFont(ofSize: Design.fieldFontSize)
             field.focusRingType = .none
@@ -395,13 +382,8 @@ final class DynamicSnippetWindow: NSPanel {
                 field.centerYAnchor.constraint(equalTo: fieldContainer.centerYAnchor),
             ])
 
-            group.addArrangedSubview(fieldContainer)
-            fieldContainer.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
-            fieldContainer.heightAnchor.constraint(equalToConstant: Design.fieldHeight).isActive = true
-
             inputFields[placeholder.name] = field
-            orderedControls.append(field)
-            controlContainers[ObjectIdentifier(field)] = fieldContainer
+            control = field
 
             NotificationCenter.default.addObserver(
                 self,
@@ -411,7 +393,25 @@ final class DynamicSnippetWindow: NSPanel {
             )
         }
 
+        group.addArrangedSubview(fieldContainer)
+        fieldContainer.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        fieldContainer.heightAnchor.constraint(equalToConstant: Design.fieldHeight).isActive = true
+        orderedControls.append(control)
+        controlContainers[ObjectIdentifier(control)] = fieldContainer
+
         return group
+    }
+
+    /// フィールドの外枠コンテナを生成する（popUp / textField 共通）。
+    private func makeFieldContainer() -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.cornerRadius = Design.fieldCornerRadius
+        container.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
+        container.layer?.borderWidth = Design.borderWidth
+        container.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(Design.borderAlpha).cgColor
+        container.translatesAutoresizingMaskIntoConstraints = false
+        return container
     }
 
     // MARK: - Hint Bar (SearchWindow 統一スタイル)
@@ -547,14 +547,14 @@ final class DynamicSnippetWindow: NSPanel {
         if allFieldsFilled() {
             handlePaste()
         } else {
-            focusNextControl(after: sender)
+            focusControl(from: sender, offset: 1)
         }
     }
 
-    /// 指定コントロールの次の orderedControls にフォーカスを移す（ループする）。
-    private func focusNextControl(after current: NSView) {
+    /// 指定コントロールから offset 分だけ移動した orderedControls にフォーカスを移す（ループする）。
+    private func focusControl(from current: NSView, offset: Int) {
         guard let idx = orderedControls.firstIndex(of: current) else { return }
-        let nextIdx = (idx + 1) % orderedControls.count
+        let nextIdx = (idx + offset + orderedControls.count) % orderedControls.count
         _ = makeFirstResponder(orderedControls[nextIdx])
     }
 
@@ -615,9 +615,9 @@ final class DynamicSnippetWindow: NSPanel {
             guard let container = controlContainers[id] else { continue }
             let isFocused = (control === focusedControl)
             container.layer?.borderColor = isFocused
-                ? NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
-                : NSColor.separatorColor.withAlphaComponent(0.3).cgColor
-            container.layer?.borderWidth = isFocused ? 1.5 : 0.5
+                ? NSColor.controlAccentColor.withAlphaComponent(Design.focusBorderAlpha).cgColor
+                : NSColor.separatorColor.withAlphaComponent(Design.borderAlpha).cgColor
+            container.layer?.borderWidth = isFocused ? Design.focusBorderWidth : Design.borderWidth
         }
     }
 
@@ -723,13 +723,11 @@ final class DynamicSnippetWindow: NSPanel {
 extension DynamicSnippetWindow: NSTextFieldDelegate {
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.insertTab(_:)) {
-            focusNextControl(after: control)
+            focusControl(from: control, offset: 1)
             return true
         }
         if commandSelector == #selector(NSResponder.insertBacktab(_:)) {
-            guard let idx = orderedControls.firstIndex(of: control) else { return false }
-            let prevIdx = (idx - 1 + orderedControls.count) % orderedControls.count
-            _ = makeFirstResponder(orderedControls[prevIdx])
+            focusControl(from: control, offset: -1)
             return true
         }
         return false
