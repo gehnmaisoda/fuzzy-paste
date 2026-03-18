@@ -194,4 +194,23 @@ struct PlaceholderParserChoiceTests {
         )
         #expect(result == "kaede様")
     }
+
+    @Test("Trims whitespace around placeholder name before colon")
+    func trimsNameWhitespace() {
+        let placeholders = PlaceholderParser.extractPlaceholders(from: "{{ size :S,M,L}}")
+        #expect(placeholders[0].name == "size")
+    }
+
+    @Test("Options with time-format colons are preserved")
+    func timeFormatInOptions() {
+        let placeholders = PlaceholderParser.extractPlaceholders(from: "{{時刻:09:00,12:00,18:00}}")
+        #expect(placeholders[0].name == "時刻")
+        #expect(placeholders[0].options == ["09:00", "12:00", "18:00"])
+    }
+
+    @Test("Single option is valid")
+    func singleOption() {
+        let placeholders = PlaceholderParser.extractPlaceholders(from: "{{x:only}}")
+        #expect(placeholders[0].options == ["only"])
+    }
 }

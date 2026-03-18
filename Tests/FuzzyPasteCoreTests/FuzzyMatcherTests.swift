@@ -330,6 +330,66 @@ struct FuzzyMatcherFilterSnippetsTests {
     }
 }
 
+// MARK: - filterMixed with snippetId conversion
+
+private func makeClipWithSnippetId(_ text: String, snippetId: UUID) -> ClipItem {
+    var item = ClipItem(id: UUID(), content: .text(text), copiedAt: Date())
+    item.snippetId = snippetId
+    return item
+}
+
+struct FuzzyMatcherFilterMixedSnippetIdTests {
+    @Test("Empty query converts clip with snippetId to snippet result")
+    func convertsSnippetIdToSnippet() {
+        let snippet = makeSnippet("My Snippet")
+        let clip = makeClipWithSnippetId("", snippetId: snippet.id)
+        let results = FuzzyMatcher.filterMixed(query: "", clips: [clip], snippets: [snippet])
+        #expect(results.count == 1)
+        #expect(results[0].clipItem == nil) // Should be a snippet, not a clip
+    }
+
+    @Test("Empty query filters out orphaned snippetId markers")
+    func filtersOrphanedSnippetId() {
+        let orphanedClip = makeClipWithSnippetId("", snippetId: UUID())
+        let normalClip = makeClip("hello")
+        let results = FuzzyMatcher.filterMixed(query: "", clips: [orphanedClip, normalClip], snippets: [])
+        #expect(results.count == 1)
+        #expect(results[0].clipItem?.text == "hello")
+    }
+
+    @Test("Empty query preserves order: snippet marker then regular clip")
+    func preservesOrder() {
+        let snippet = makeSnippet("Snippet A")
+        let snippetClip = makeClipWithSnippetId("", snippetId: snippet.id)
+        let normalClip = makeClip("regular text")
+        let results = FuzzyMatcher.filterMixed(query: "", clips: [snippetClip, normalClip], snippets: [snippet])
+        #expect(results.count == 2)
+        #expect(results[0].clipItem == nil) // snippet
+        #expect(results[1].clipItem?.text == "regular text")
+    }
+
+    @Test("Empty query excludes snippets without content from snippetId lookup")
+    func excludesEmptySnippets() {
+        // SnippetItem with no content should be filtered by hasContent
+        let emptySnippet = SnippetItem(title: "Empty", content: .text(""), tags: [])
+        let clip = makeClipWithSnippetId("", snippetId: emptySnippet.id)
+        let results = FuzzyMatcher.filterMixed(query: "", clips: [clip], snippets: [emptySnippet])
+        // Empty snippet has hasContent = false, so it won't be in activeSnippets map
+        #expect(results.count == 0)
+    }
+
+    @Test("Non-empty query ignores snippetId and searches normally")
+    func querySearchIgnoresSnippetId() {
+        let snippet = makeSnippet("hello world")
+        let markerClip = makeClipWithSnippetId("", snippetId: snippet.id)
+        let normalClip = makeClip("hello there")
+        let results = FuzzyMatcher.filterMixed(query: "hello", clips: [markerClip, normalClip], snippets: [snippet])
+        // markerClip has empty text, won't match "hello"
+        // normalClip matches, snippet matches
+        #expect(results.count == 2)
+    }
+}
+
 // MARK: - filterMixed with tagFilters
 
 struct FuzzyMatcherFilterMixedTagTests {
