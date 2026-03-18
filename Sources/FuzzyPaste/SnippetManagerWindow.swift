@@ -1051,7 +1051,7 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         contentPlaceholder.translatesAutoresizingMaskIntoConstraints = false
         contentWrapper.addSubview(contentPlaceholder)
 
-        contentTextView.frame = NSRect(x: 0, y: 0, width: 100, height: 100)
+        contentTextView.frame = NSRect(x: 0, y: 0, width: 0, height: 0)
         contentTextView.font = .monospacedSystemFont(ofSize: Layout.fieldFontSize, weight: .regular)
         contentTextView.isRichText = false
         contentTextView.allowsUndo = true
@@ -1064,13 +1064,15 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
         contentTextView.isHorizontallyResizable = false
         contentTextView.autoresizingMask = [.width]
         contentTextView.textContainer?.widthTracksTextView = true
-        contentTextView.textContainer?.containerSize = NSSize(width: 100, height: CGFloat.greatestFiniteMagnitude)
+        contentTextView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         contentTextView.isEditable = false
         contentTextView.isSelectable = false
         contentTextView.delegate = self
 
         contentScrollView.documentView = contentTextView
         contentScrollView.hasVerticalScroller = true
+        contentScrollView.hasHorizontalScroller = false
+        contentScrollView.horizontalScrollElasticity = .none
         contentScrollView.scrollerStyle = .overlay
         contentScrollView.borderType = .noBorder
         contentScrollView.drawsBackground = false
@@ -1463,15 +1465,26 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             case KeyCode.c: #selector(NSText.copy(_:))
             case KeyCode.x: #selector(NSText.cut(_:))
             case KeyCode.a: #selector(NSText.selectAll(_:))
-            case KeyCode.z: #selector(UndoManager.undo)
+            case KeyCode.z: nil  // undo は下で個別処理
             default: nil
             }
             if let action, firstResponder?.tryToPerform(action, with: nil) == true {
                 return true
             }
+            // Cmd+Z → Undo（tryToPerform ではセレクタが undo:/undo で不一致のため直接呼ぶ）
+            if event.keyCode == KeyCode.z,
+               let textView = firstResponder as? NSTextView,
+               let undoManager = textView.undoManager,
+               undoManager.canUndo {
+                undoManager.undo()
+                return true
+            }
         }
         if flags == [.command, .shift] && event.keyCode == KeyCode.z {
-            if firstResponder?.tryToPerform(#selector(UndoManager.redo), with: nil) == true {
+            if let textView = firstResponder as? NSTextView,
+               let undoManager = textView.undoManager,
+               undoManager.canRedo {
+                undoManager.redo()
                 return true
             }
         }
@@ -1658,6 +1671,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
                 contentTextView.string = text
                 contentTextView.isEditable = true
                 contentTextView.isSelectable = true
+                // テキスト設定後にフレーム幅を clipView に合わせる
+                let clipWidth = contentScrollView.contentView.bounds.width
+                if clipWidth > 0 {
+                    contentTextView.setFrameSize(NSSize(width: clipWidth, height: contentTextView.frame.height))
+                }
                 contentPlaceholder.isHidden = !text.isEmpty
             case .image(let meta):
                 typeSegment.selectedSegment = 1
@@ -1708,15 +1726,27 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
             tags: tagContainer.tags
         )
         tagContainer.allKnownTags = store.allTags
-        // filteredSnippets を更新（タグ変更でフィルタ結果が変わる可能性）
-        let selectedId = item.id
+
+        // reloadData はフォーカスを奪うため、左パネルのセルのみ更新する。
+        // タグ変更でフィルタ結果が変わる場合のみ全体リロードする。
+        let previousFiltered = filteredSnippets
         filteredSnippets = FuzzyMatcher.filterSnippets(
             query: searchQuery, snippets: store.items, tagFilters: activeTagFilters
         )
-        tableView.reloadData()
-        // 編集中のアイテムの選択を維持
-        if let newRow = filteredSnippets.firstIndex(where: { $0.id == selectedId }) {
-            tableView.selectRowIndexes(IndexSet(integer: newRow), byExtendingSelection: false)
+        let selectedId = item.id
+        if filteredSnippets.map(\.id) != previousFiltered.map(\.id) {
+            // フィルタ結果が変わった場合のみ全体リロード + フォーカス復元
+            let currentResponder = self.firstResponder
+            tableView.reloadData()
+            if let newRow = filteredSnippets.firstIndex(where: { $0.id == selectedId }) {
+                tableView.selectRowIndexes(IndexSet(integer: newRow), byExtendingSelection: false)
+            }
+            if let responder = currentResponder {
+                self.makeFirstResponder(responder)
+            }
+        } else if let newRow = filteredSnippets.firstIndex(where: { $0.id == selectedId }) {
+            // フィルタ結果が同じなら対応する行だけ更新（フォーカスを奪わない）
+            tableView.reloadData(forRowIndexes: IndexSet(integer: newRow), columnIndexes: IndexSet(integer: 0))
         }
     }
 
@@ -1799,6 +1829,12 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
     func textDidChange(_ notification: Notification) {
         guard !isUpdatingFields else { return }
+        // Undo/Redo でテキストビューの幅がずれる問題を防止
+        let clipWidth = contentScrollView.contentView.bounds.width
+        if contentTextView.frame.width != clipWidth {
+            contentTextView.setFrameSize(NSSize(width: clipWidth, height: contentTextView.frame.height))
+        }
+        contentScrollView.contentView.scroll(to: NSPoint(x: 0, y: contentScrollView.contentView.bounds.origin.y))
         contentPlaceholder.isHidden = !contentTextView.string.isEmpty
         saveCurrentEdits()
     }

@@ -61,6 +61,8 @@ public struct ClipItem: Identifiable, Sendable {
     public var useCount: Int
     /// 最後にペースト/コピーされた日時。frecency スコアの減衰計算に使用。
     public var lastUsedAt: Date?
+    /// スニペット使用履歴の場合、元スニペットの ID。
+    public var snippetId: UUID?
 
     public init(text: String) {
         self.id = UUID()
@@ -68,6 +70,7 @@ public struct ClipItem: Identifiable, Sendable {
         self.copiedAt = Date()
         self.useCount = 0
         self.lastUsedAt = nil
+        self.snippetId = nil
     }
 
     public init(imageMetadata: ImageMetadata) {
@@ -76,6 +79,7 @@ public struct ClipItem: Identifiable, Sendable {
         self.copiedAt = Date()
         self.useCount = 0
         self.lastUsedAt = nil
+        self.snippetId = nil
     }
 
     public init(fileMetadata: FileMetadata) {
@@ -84,15 +88,17 @@ public struct ClipItem: Identifiable, Sendable {
         self.copiedAt = Date()
         self.useCount = 0
         self.lastUsedAt = nil
+        self.snippetId = nil
     }
 
     /// 既存アイテムの内容を置き換えて再構築する。OCR テキスト更新等で使用。
-    init(id: UUID, content: ClipContent, copiedAt: Date, useCount: Int = 0, lastUsedAt: Date? = nil) {
+    init(id: UUID, content: ClipContent, copiedAt: Date, useCount: Int = 0, lastUsedAt: Date? = nil, snippetId: UUID? = nil) {
         self.id = id
         self.content = content
         self.copiedAt = copiedAt
         self.useCount = useCount
         self.lastUsedAt = lastUsedAt
+        self.snippetId = snippetId
     }
 
     /// テキストコンテンツを返す。画像・ファイルの場合は nil。
@@ -104,7 +110,7 @@ public struct ClipItem: Identifiable, Sendable {
 
 extension ClipItem: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, content, copiedAt, useCount, lastUsedAt
+        case id, content, copiedAt, useCount, lastUsedAt, snippetId
     }
 
     public init(from decoder: Decoder) throws {
@@ -114,6 +120,7 @@ extension ClipItem: Codable {
         copiedAt = try container.decode(Date.self, forKey: .copiedAt)
         useCount = try container.decodeIfPresent(Int.self, forKey: .useCount) ?? 0
         lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+        snippetId = try container.decodeIfPresent(UUID.self, forKey: .snippetId)
     }
 }
 
@@ -145,9 +152,23 @@ public final class HistoryStore {
     /// 重複排除時は frecency データ（useCount / lastUsedAt）を引き継ぐ。
     public func add(_ text: String) {
         guard !text.allSatisfy(\.isWhitespace) else { return }
-        let existing = items.first { $0.text == text }
-        items.removeAll { $0.text == text }
+        let existing = items.first { $0.text == text && $0.snippetId == nil }
+        items.removeAll { $0.text == text && $0.snippetId == nil }
         var newItem = ClipItem(text: text)
+        if let existing {
+            newItem.useCount = existing.useCount
+            newItem.lastUsedAt = existing.lastUsedAt
+        }
+        items.insert(newItem, at: 0)
+        trimAndSave()
+    }
+
+    /// スニペット使用をマーカーとして履歴に追加。同じ snippetId があれば先頭に移動。
+    public func addSnippetUse(snippetId: UUID) {
+        let existing = items.first { $0.snippetId == snippetId }
+        items.removeAll { $0.snippetId == snippetId }
+        var newItem = ClipItem(text: "")
+        newItem.snippetId = snippetId
         if let existing {
             newItem.useCount = existing.useCount
             newItem.lastUsedAt = existing.lastUsedAt

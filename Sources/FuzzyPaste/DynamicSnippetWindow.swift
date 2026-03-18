@@ -3,11 +3,19 @@ import FuzzyPasteCore
 
 /// 動的スニペットのプレースホルダーに値を入力するモーダルダイアログ。
 /// 左ペイン: ヘッダー + 入力フィールド、右ペイン: リアルタイムプレビュー の2面構成。
+/// 選択肢付きプレースホルダー `{{名前:A,B,C}}` はドロップダウンで表示する。
 @MainActor
 final class DynamicSnippetWindow: NSPanel {
     private let snippet: SnippetItem
-    private let placeholderNames: [String]
+    private let placeholders: [PlaceholderParser.Placeholder]
+    /// 自由入力フィールド（名前 → NSTextField）
     private var inputFields: [String: NSTextField] = [:]
+    /// 選択肢ドロップダウン（名前 → NSPopUpButton）
+    private var popUpButtons: [String: NSPopUpButton] = [:]
+    /// 全入力コントロールを出現順で保持（フォーカス制御用）
+    private var orderedControls: [NSView] = []
+    /// コントロール → 外枠コンテナ（フォーカスリング表示用）
+    private var controlContainers: [ObjectIdentifier: NSView] = [:]
     private let previewTextView = NSTextView()
 
     var onPaste: ((String) -> Void)?
@@ -17,8 +25,8 @@ final class DynamicSnippetWindow: NSPanel {
     // MARK: - デザイン定数
 
     private enum Design {
-        static let windowWidth: CGFloat = 720
-        static let windowHeight: CGFloat = 420
+        static let windowWidth: CGFloat = 840
+        static let windowHeight: CGFloat = 560
         static let cornerRadius: CGFloat = 14
         static let padding: CGFloat = 24
         static let sectionSpacing: CGFloat = 18
@@ -34,11 +42,15 @@ final class DynamicSnippetWindow: NSPanel {
         static let fieldGroupSpacing: CGFloat = 14
         static let dividerWidth: CGFloat = 0.5
         static let panelSplitRatio: CGFloat = 0.45 // 左ペインの幅割合
+        static let borderWidth: CGFloat = 0.5
+        static let focusBorderWidth: CGFloat = 1.5
+        static let borderAlpha: CGFloat = 0.3
+        static let focusBorderAlpha: CGFloat = 0.6
     }
 
-    init(snippet: SnippetItem, placeholderNames: [String]) {
+    init(snippet: SnippetItem, placeholders: [PlaceholderParser.Placeholder]) {
         self.snippet = snippet
-        self.placeholderNames = placeholderNames
+        self.placeholders = placeholders
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: Design.windowWidth, height: Design.windowHeight),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
@@ -54,6 +66,15 @@ final class DynamicSnippetWindow: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         setupUI()
+    }
+
+    /// フィールドエディタの undo を有効にする。
+    override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+        let editor = super.fieldEditor(createFlag, for: object)
+        if let textView = editor as? NSTextView {
+            textView.allowsUndo = true
+        }
+        return editor
     }
 
     // MARK: - UI
@@ -189,8 +210,8 @@ final class DynamicSnippetWindow: NSPanel {
         stack.addArrangedSubview(fieldsStack)
         fieldsStack.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        for name in placeholderNames {
-            let group = makeFieldGroup(name: name)
+        for placeholder in placeholders {
+            let group = makeFieldGroup(placeholder: placeholder)
             fieldsStack.addArrangedSubview(group)
             group.widthAnchor.constraint(equalTo: fieldsStack.widthAnchor).isActive = true
         }
@@ -278,7 +299,7 @@ final class DynamicSnippetWindow: NSPanel {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(titleLabel)
 
-        let subtitleLabel = NSTextField(labelWithString: "\(placeholderNames.count) 個の入力項目")
+        let subtitleLabel = NSTextField(labelWithString: "\(placeholders.count) 個の入力項目")
         subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
         subtitleLabel.textColor = .tertiaryLabelColor
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -302,58 +323,95 @@ final class DynamicSnippetWindow: NSPanel {
         return container
     }
 
-    private func makeFieldGroup(name: String) -> NSView {
+    /// プレースホルダーの種類に応じて NSTextField（自由入力）または NSPopUpButton（選択肢）を生成する。
+    private func makeFieldGroup(placeholder: PlaceholderParser.Placeholder) -> NSView {
         let group = NSStackView()
         group.orientation = .vertical
         group.alignment = .leading
         group.spacing = Design.fieldSpacing
         group.translatesAutoresizingMaskIntoConstraints = false
 
-        let label = NSTextField(labelWithString: name)
+        let label = NSTextField(labelWithString: placeholder.name)
         label.font = .systemFont(ofSize: Design.labelFontSize, weight: .medium)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         group.addArrangedSubview(label)
 
-        let fieldContainer = NSView()
-        fieldContainer.wantsLayer = true
-        fieldContainer.layer?.cornerRadius = Design.fieldCornerRadius
-        fieldContainer.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
-        fieldContainer.layer?.borderWidth = 0.5
-        fieldContainer.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
-        fieldContainer.translatesAutoresizingMaskIntoConstraints = false
+        let fieldContainer = makeFieldContainer()
+        let control: NSView
 
-        let field = NSTextField()
-        field.font = .systemFont(ofSize: Design.fieldFontSize)
-        field.focusRingType = .none
-        field.isBordered = false
-        field.drawsBackground = false
-        field.placeholderString = "\(name) を入力..."
-        field.target = self
-        field.action = #selector(handlePaste)
-        field.translatesAutoresizingMaskIntoConstraints = false
-        fieldContainer.addSubview(field)
+        if let options = placeholder.options {
+            // 選択肢付き → テキストフィールドと統一されたスタイルのドロップダウン
+            let popUp = NSPopUpButton(frame: .zero, pullsDown: false)
+            popUp.addItems(withTitles: options)
+            popUp.font = .systemFont(ofSize: Design.fieldFontSize)
+            popUp.isBordered = false
+            (popUp.cell as? NSPopUpButtonCell)?.arrowPosition = .arrowAtBottom
+            popUp.translatesAutoresizingMaskIntoConstraints = false
+            popUp.focusRingType = .none
+            popUp.target = self
+            popUp.action = #selector(popUpSelectionChanged(_:))
+            fieldContainer.addSubview(popUp)
 
-        NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: fieldContainer.leadingAnchor, constant: 10),
-            field.trailingAnchor.constraint(equalTo: fieldContainer.trailingAnchor, constant: -10),
-            field.centerYAnchor.constraint(equalTo: fieldContainer.centerYAnchor),
-        ])
+            NSLayoutConstraint.activate([
+                popUp.leadingAnchor.constraint(equalTo: fieldContainer.leadingAnchor, constant: 6),
+                popUp.trailingAnchor.constraint(equalTo: fieldContainer.trailingAnchor, constant: -6),
+                popUp.centerYAnchor.constraint(equalTo: fieldContainer.centerYAnchor),
+            ])
+
+            popUpButtons[placeholder.name] = popUp
+            control = popUp
+        } else {
+            // 自由入力 → NSTextField
+            let field = NSTextField()
+            field.font = .systemFont(ofSize: Design.fieldFontSize)
+            field.focusRingType = .none
+            field.isBordered = false
+            field.drawsBackground = false
+            (field.cell as? NSTextFieldCell)?.allowsUndo = true
+            field.placeholderString = "\(placeholder.name) を入力..."
+            field.delegate = self
+            field.target = self
+            field.action = #selector(fieldReturnPressed(_:))
+            field.translatesAutoresizingMaskIntoConstraints = false
+            fieldContainer.addSubview(field)
+
+            NSLayoutConstraint.activate([
+                field.leadingAnchor.constraint(equalTo: fieldContainer.leadingAnchor, constant: 10),
+                field.trailingAnchor.constraint(equalTo: fieldContainer.trailingAnchor, constant: -10),
+                field.centerYAnchor.constraint(equalTo: fieldContainer.centerYAnchor),
+            ])
+
+            inputFields[placeholder.name] = field
+            control = field
+
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(textDidChangeNotification(_:)),
+                name: NSControl.textDidChangeNotification,
+                object: field
+            )
+        }
 
         group.addArrangedSubview(fieldContainer)
         fieldContainer.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
         fieldContainer.heightAnchor.constraint(equalToConstant: Design.fieldHeight).isActive = true
-
-        inputFields[name] = field
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(textDidChangeNotification(_:)),
-            name: NSControl.textDidChangeNotification,
-            object: field
-        )
+        orderedControls.append(control)
+        controlContainers[ObjectIdentifier(control)] = fieldContainer
 
         return group
+    }
+
+    /// フィールドの外枠コンテナを生成する（popUp / textField 共通）。
+    private func makeFieldContainer() -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.cornerRadius = Design.fieldCornerRadius
+        container.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
+        container.layer?.borderWidth = Design.borderWidth
+        container.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(Design.borderAlpha).cgColor
+        container.translatesAutoresizingMaskIntoConstraints = false
+        return container
     }
 
     // MARK: - Hint Bar (SearchWindow 統一スタイル)
@@ -453,18 +511,28 @@ final class DynamicSnippetWindow: NSPanel {
         updatePreview()
     }
 
+    @objc private func popUpSelectionChanged(_ sender: NSPopUpButton) {
+        updatePreview()
+    }
+
     private func updatePreview() {
         let values = currentValues()
         let resolved = PlaceholderParser.resolve(template: snippet.text ?? "", values: values)
         previewTextView.string = resolved
     }
 
+    /// 自由入力フィールドと選択肢ドロップダウンの両方から現在の値を収集する。
     private func currentValues() -> [String: String] {
         var values: [String: String] = [:]
         for (name, field) in inputFields {
             let text = field.stringValue
             if !text.isEmpty {
                 values[name] = text
+            }
+        }
+        for (name, popUp) in popUpButtons {
+            if let title = popUp.selectedItem?.title {
+                values[name] = title
             }
         }
         return values
@@ -474,13 +542,54 @@ final class DynamicSnippetWindow: NSPanel {
         PlaceholderParser.resolve(template: snippet.text ?? "", values: currentValues())
     }
 
+    /// Enter キーで呼ばれる。全フィールド入力済みならペースト、そうでなければ次へ移動。
+    @objc private func fieldReturnPressed(_ sender: NSTextField) {
+        if allFieldsFilled() {
+            handlePaste()
+        } else {
+            focusControl(from: sender, offset: 1)
+        }
+    }
+
+    /// 指定コントロールから offset 分だけ移動した orderedControls にフォーカスを移す（ループする）。
+    private func focusControl(from current: NSView, offset: Int) {
+        guard let idx = orderedControls.firstIndex(of: current) else { return }
+        let nextIdx = (idx + offset + orderedControls.count) % orderedControls.count
+        _ = makeFirstResponder(orderedControls[nextIdx])
+    }
+
+    /// すべての自由入力フィールドが入力済みかどうかを返す。
+    private func allFieldsFilled() -> Bool {
+        inputFields.values.allSatisfy { !$0.stringValue.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
     @objc private func handlePaste() {
+        guard allFieldsFilled() else {
+            focusNextEmptyField()
+            return
+        }
         let text = resolvedText()
         dismiss()
         onPaste?(text)
     }
 
+    /// 最初の未入力フリーテキストフィールドにフォーカスを移す。
+    private func focusNextEmptyField() {
+        for control in orderedControls {
+            if let field = control as? NSTextField,
+               field.isEditable,
+               field.stringValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                _ = makeFirstResponder(field)
+                return
+            }
+        }
+    }
+
     private func handleCopy() {
+        guard allFieldsFilled() else {
+            focusNextEmptyField()
+            return
+        }
         let text = resolvedText()
         dismiss()
         onCopy?(text)
@@ -489,6 +598,42 @@ final class DynamicSnippetWindow: NSPanel {
     @objc private func handleCancel() {
         dismiss()
         onCancel?()
+    }
+
+    // MARK: - Focus Ring
+
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let result = super.makeFirstResponder(responder)
+        updateFocusRing()
+        return result
+    }
+
+    private func updateFocusRing() {
+        let focusedControl = focusedOrderedControl()
+        for control in orderedControls {
+            let id = ObjectIdentifier(control)
+            guard let container = controlContainers[id] else { continue }
+            let isFocused = (control === focusedControl)
+            container.layer?.borderColor = isFocused
+                ? NSColor.controlAccentColor.withAlphaComponent(Design.focusBorderAlpha).cgColor
+                : NSColor.separatorColor.withAlphaComponent(Design.borderAlpha).cgColor
+            container.layer?.borderWidth = isFocused ? Design.focusBorderWidth : Design.borderWidth
+        }
+    }
+
+    /// 現在フォーカスされている orderedControls 内のコントロールを返す。
+    private func focusedOrderedControl() -> NSView? {
+        let responder = firstResponder
+        // テキストフィールド編集中は field editor (NSTextView) が firstResponder
+        if let textView = responder as? NSTextView,
+           let field = textView.delegate as? NSTextField,
+           orderedControls.contains(field) {
+            return field
+        }
+        if let view = responder as? NSView, orderedControls.contains(view) {
+            return view
+        }
+        return nil
     }
 
     // MARK: - Show / Dismiss
@@ -501,8 +646,9 @@ final class DynamicSnippetWindow: NSPanel {
         let y = screenFrame.midY - windowSize.height / 2
         setFrameOrigin(NSPoint(x: x, y: y))
         makeKeyAndOrderFront(nil)
-        if let firstName = placeholderNames.first, let field = inputFields[firstName] {
-            makeFirstResponder(field)
+        // 最初の入力コントロール（種類問わず）にフォーカス
+        if let first = orderedControls.first {
+            _ = makeFirstResponder(first)
         }
     }
 
@@ -513,27 +659,78 @@ final class DynamicSnippetWindow: NSPanel {
 
     // MARK: - Key Handling
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let chars = event.charactersIgnoringModifiers ?? ""
+    private enum KeyCode {
+        static let z: UInt16 = 6
+        static let a: UInt16 = 0
+        static let c: UInt16 = 8
+        static let w: UInt16 = 13
+        static let returnKey: UInt16 = 36
+    }
 
-        if flags == .command {
-            switch chars {
-            case "c":
-                handleCopy()
-                return true
-            case "w":
-                handleCancel()
-                return true
-            default:
-                break
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+            // Cmd+キー: フィールドエディタへの委譲 or 独自ハンドリング
+            if flags == .command {
+                switch event.keyCode {
+                case KeyCode.z:
+                    if let textView = firstResponder as? NSTextView,
+                       let undoManager = textView.undoManager,
+                       undoManager.canUndo {
+                        undoManager.undo()
+                        return
+                    }
+                case KeyCode.a:
+                    if firstResponder?.tryToPerform(#selector(NSText.selectAll(_:)), with: nil) == true {
+                        return
+                    }
+                case KeyCode.c:
+                    handleCopy()
+                    return
+                case KeyCode.w:
+                    handleCancel()
+                    return
+                default:
+                    break
+                }
+            }
+            // Cmd+Shift+Z → Redo
+            if flags == [.command, .shift] && event.keyCode == KeyCode.z {
+                if let textView = firstResponder as? NSTextView,
+                   let undoManager = textView.undoManager,
+                   undoManager.canRedo {
+                    undoManager.redo()
+                    return
+                }
+            }
+            // Return キー（テキストフィールド以外にフォーカス中）→ ペースト
+            if flags.isEmpty && event.keyCode == KeyCode.returnKey && !(firstResponder is NSText) {
+                handlePaste()
+                return
             }
         }
-        return super.performKeyEquivalent(with: event)
+        super.sendEvent(event)
     }
 
     override func cancelOperation(_ sender: Any?) {
         handleCancel()
+    }
+}
+
+// MARK: - NSControlTextEditingDelegate (Tab / Shift-Tab でフォーカス移動)
+
+extension DynamicSnippetWindow: NSTextFieldDelegate {
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertTab(_:)) {
+            focusControl(from: control, offset: 1)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.insertBacktab(_:)) {
+            focusControl(from: control, offset: -1)
+            return true
+        }
+        return false
     }
 }
 

@@ -21,9 +21,8 @@ final class ClipboardMonitor {
     /// 前回の値と比較することで変更を検知する。
     private var lastChangeCount: Int
     private let pasteboard = NSPasteboard.general
-    /// 自分自身がペースト/コピーした後の changeCount を記録し、
-    /// 次のポーリングで一致したらスキップすることで重複検知を防ぐ。
-    private var changeCountToIgnore: Int?
+    /// 次のクリップボード変更を無視するフラグ。
+    private var skipNextChange = false
     var onNewClip: ((ClipboardContent) -> Void)?
     /// フロントアプリの bundleIdentifier を受け取り、除外対象なら true を返す。
     var shouldExclude: ((String) -> Bool)?
@@ -45,11 +44,10 @@ final class ClipboardMonitor {
         timer = nil
     }
 
-    /// 次に検知する changeCount を無視する。
-    /// ペースト/コピー操作で自分がクリップボードに書き込んだ後に呼び、
-    /// 書き込み後の changeCount を記録する。
+    /// 次に検知するクリップボード変更を1回だけ無視する。
+    /// クリップボードへの書き込み前に呼ぶ。
     func ignoreNextChange() {
-        changeCountToIgnore = pasteboard.changeCount
+        skipNextChange = true
     }
 
     private func checkForChanges() {
@@ -57,12 +55,11 @@ final class ClipboardMonitor {
         guard currentCount != lastChangeCount else { return }
         lastChangeCount = currentCount
 
-        // 自分が書き込んだ changeCount なら無視してリセット
-        if let ignoreCount = changeCountToIgnore, currentCount == ignoreCount {
-            changeCountToIgnore = nil
+        // 自分が書き込んだ変更なら無視してリセット
+        if skipNextChange {
+            skipNextChange = false
             return
         }
-        changeCountToIgnore = nil
 
         // フロントアプリが除外対象ならスキップ
         if let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,

@@ -95,7 +95,14 @@ public enum FuzzyMatcher {
         }
 
         if query.isEmpty {
-            return clips.map { SearchResultItem.clip($0) }
+            let snippetMap = Dictionary(uniqueKeysWithValues: activeSnippets.map { ($0.id, $0) })
+            return clips.compactMap { clip -> SearchResultItem? in
+                if let sid = clip.snippetId {
+                    guard let snippet = snippetMap[sid] else { return nil }
+                    return .snippet(snippet)
+                }
+                return .clip(clip)
+            }
         }
 
         var scored: [(item: SearchResultItem, score: Double)] = []

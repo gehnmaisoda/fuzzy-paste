@@ -198,10 +198,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func createSearchWindow() -> SearchWindow {
         let window = SearchWindow(layout: preferencesStore.layoutConfig)
-        window.onPaste = { [weak self] item, previousApp in
+        window.onPaste = { [weak self] item, previousApp, snippetId in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()
             self.historyStore.recordUse(id: item.id)
+            if let snippetId {
+                self.historyStore.addSnippetUse(snippetId: snippetId)
+            }
             switch item.content {
             case .text(let text):
                 PasteHelper.paste(text, previousApp: previousApp)
@@ -225,10 +228,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard !texts.isEmpty else { return }
             PasteHelper.paste(texts, previousApp: previousApp)
         }
-        window.onCopy = { [weak self] item in
+        window.onCopy = { [weak self] item, snippetId in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()
             self.historyStore.recordUse(id: item.id)
+            if let snippetId {
+                self.historyStore.addSnippetUse(snippetId: snippetId)
+            }
             switch item.content {
             case .text(let text):
                 PasteHelper.copyToClipboard(text)
@@ -259,19 +265,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showDynamicSnippetDialog(snippet: SnippetItem, previousApp: NSRunningApplication?) {
         guard let text = snippet.text else { return }
-        let names = PlaceholderParser.extractPlaceholderNames(from: text)
-        guard !names.isEmpty else { return }
+        let placeholders = PlaceholderParser.extractPlaceholders(from: text)
+        guard !placeholders.isEmpty else { return }
 
-        let window = DynamicSnippetWindow(snippet: snippet, placeholderNames: names)
+        let window = DynamicSnippetWindow(snippet: snippet, placeholders: placeholders)
         window.onPaste = { [weak self] resolvedText in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()
+            self.historyStore.add(resolvedText)
+            self.historyStore.addSnippetUse(snippetId: snippet.id)
             PasteHelper.paste(resolvedText, previousApp: previousApp)
             self.dynamicSnippetWindow = nil
         }
         window.onCopy = { [weak self] resolvedText in
             guard let self else { return }
             self.clipboardMonitor.ignoreNextChange()
+            self.historyStore.add(resolvedText)
+            self.historyStore.addSnippetUse(snippetId: snippet.id)
             PasteHelper.copyToClipboard(resolvedText)
             self.dynamicSnippetWindow = nil
         }

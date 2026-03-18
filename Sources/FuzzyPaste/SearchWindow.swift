@@ -301,11 +301,12 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
     /// ウィンドウを開く直前にアクティブだったアプリ。ペースト先として使用。
     private(set) var previousApp: NSRunningApplication?
     /// Enter で選択 → ペースト実行（ClipItem ベース）
-    var onPaste: ((ClipItem, NSRunningApplication?) -> Void)?
+    /// ペースト時のコールバック。snippetId はスニペット由来の場合に設定される。
+    var onPaste: ((ClipItem, NSRunningApplication?, _ snippetId: UUID?) -> Void)?
     /// マルチセレクト時のペースト（選択順の ClipItem 配列）
     var onMultiPaste: (([ClipItem], NSRunningApplication?) -> Void)?
     /// Cmd+C で選択 → クリップボードにコピーのみ（ClipItem ベース）
-    var onCopy: ((ClipItem) -> Void)?
+    var onCopy: ((ClipItem, _ snippetId: UUID?) -> Void)?
     /// Cmd+E でスニペット管理ウィンドウを開く
     var onOpenSnippetManager: (() -> Void)?
     /// Cmd+, で設定ウィンドウを開く
@@ -1644,17 +1645,27 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                 onDynamicSnippetPaste?(snippet, app)
                 return
             }
+            let snippetId = selectedSnippetId(at: row)
             guard let clipItem = selectedClipItem() else { return }
             dismiss()
-            onPaste?(clipItem, app)
+            onPaste?(clipItem, app, snippetId)
         }
     }
 
     /// Cmd+C: 選択アイテムをクリップボードにコピー（ペーストはしない）
     private func copyCurrentItem() {
+        let row = tableView.selectedRow
+        let snippetId = selectedSnippetId(at: row)
         guard let clipItem = selectedClipItem() else { return }
         dismiss()
-        onCopy?(clipItem)
+        onCopy?(clipItem, snippetId)
+    }
+
+    /// 指定行がスニペットなら snippetId を返す。
+    private func selectedSnippetId(at row: Int) -> UUID? {
+        guard row >= 0, row < filteredItems.count,
+              case .snippet(let snippet) = filteredItems[row] else { return nil }
+        return snippet.id
     }
 
     /// 選択中のクリップアイテムをスニペットとして保存する。
