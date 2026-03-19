@@ -891,10 +891,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             return
         }
 
-        let lower = input.lowercased()
         // 既にフィルタ中のタグはサジェストから除外
         if let match = allTags.first(where: {
-            $0.lowercased().hasPrefix(lower) && !activeTagFilters.contains($0)
+            $0.hasPrefix(input) && !activeTagFilters.contains($0)
         }) {
             suggestedTag = match
             suggestionLabel.stringValue = match

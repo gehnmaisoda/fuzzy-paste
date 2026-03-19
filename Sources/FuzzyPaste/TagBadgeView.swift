@@ -256,9 +256,8 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
             suggestionLabel.isHidden = true
             return
         }
-        let lower = input.lowercased()
         if let match = allKnownTags.first(where: {
-            $0.lowercased().hasPrefix(lower) && !tags.contains($0)
+            $0.hasPrefix(input) && !tags.contains($0)
         }) {
             suggestedTag = match
             suggestionLabel.stringValue = match
