@@ -51,6 +51,17 @@ public enum ClipContent: Sendable, Equatable {
 
 extension ClipContent: Codable {}
 
+extension ClipContent {
+    /// コンテンツ種別から自動付与されるタグ。テキストは空。
+    public var autoTags: [String] {
+        switch self {
+        case .text: return []
+        case .image: return [AutoTag.imageTag]
+        case .file(let meta): return AutoTag.tags(forExtension: meta.fileExtension)
+        }
+    }
+}
+
 /// クリップボード履歴の1エントリ。
 /// JSON で永続化するため Codable に準拠。
 public struct ClipItem: Identifiable, Sendable {

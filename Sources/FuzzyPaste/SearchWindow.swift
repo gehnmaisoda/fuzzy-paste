@@ -891,10 +891,9 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             return
         }
 
-        let lower = input.lowercased()
         // 既にフィルタ中のタグはサジェストから除外
         if let match = allTags.first(where: {
-            $0.lowercased().hasPrefix(lower) && !activeTagFilters.contains($0)
+            $0.hasPrefix(input) && !activeTagFilters.contains($0)
         }) {
             suggestedTag = match
             suggestionLabel.stringValue = match
@@ -1159,8 +1158,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
                     .joined(separator: " "))
             case .image(let meta):
                 cellView = makeImageCell(tableView: tableView, meta: meta)
+                applyAutoTagBadges(to: cellView, titleTag: Self.imageTitleTag, autoTags: clipItem.content.autoTags, titleText: meta.originalFileName ?? "")
             case .file(let meta):
                 cellView = makeFileCell(tableView: tableView, meta: meta)
+                applyAutoTagBadges(to: cellView, titleTag: Self.fileTitleTag, autoTags: clipItem.content.autoTags, titleText: meta.originalFileName)
             }
         case .snippet(let snippetItem):
             switch snippetItem.content {
@@ -1462,6 +1463,10 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             attrStr.append(NSAttributedString(string: " "))
             attrStr.append(accentBadgeAttachment(text: "{ }"))
         }
+        for tag in snippet.content.autoTags {
+            attrStr.append(NSAttributedString(string: " "))
+            attrStr.append(autoTagBadgeAttachment(text: tag))
+        }
         for tag in snippet.tags {
             attrStr.append(NSAttributedString(string: " "))
             attrStr.append(tagBadgeAttachment(text: tag))
@@ -1586,6 +1591,30 @@ final class SearchWindow: NSPanel, NSTextFieldDelegate, NSTableViewDataSource, N
             textColor: .secondaryLabelColor,
             bgColor: .tertiaryLabelColor.withAlphaComponent(0.2)
         )
+    }
+
+    /// 自動タグ用ピル型バッジ。ユーザータグと区別するため色を変える。
+    private func autoTagBadgeAttachment(text: String) -> NSAttributedString {
+        badgeAttachment(
+            text: text,
+            font: .systemFont(ofSize: layout.badgeFontSize, weight: .semibold),
+            textColor: .systemTeal,
+            bgColor: .systemTeal.withAlphaComponent(0.12)
+        )
+    }
+
+    /// クリップセルのタイトルラベルに auto-tag バッジを付与する。
+    private func applyAutoTagBadges(to cellView: NSView, titleTag: Int, autoTags: [String], titleText: String) {
+        guard !autoTags.isEmpty,
+              let titleLabel = cellView.viewWithTag(titleTag) as? NSTextField else { return }
+        let attrStr = NSMutableAttributedString(string: titleText, attributes: [
+            .font: NSFont.systemFont(ofSize: layout.cellFontSize, weight: .medium),
+        ])
+        for tag in autoTags {
+            attrStr.append(NSAttributedString(string: " "))
+            attrStr.append(autoTagBadgeAttachment(text: tag))
+        }
+        titleLabel.attributedStringValue = attrStr
     }
 
     // MARK: - Actions

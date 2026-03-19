@@ -193,7 +193,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ウィンドウは一度作ったら再利用する（毎回生成しない）
         let window = searchWindow ?? createSearchWindow()
         searchWindow = window
-        window.show(clips: historyStore.items, snippets: snippetStore.items, imageStore: imageStore, fileStore: fileStore, allTags: snippetStore.allTags)
+        // スニペットのタグ + クリップの autoTags を統合してサジェスト候補にする
+        let clipAutoTags = historyStore.items.flatMap { $0.content.autoTags }
+        let allTags = Array(Set(snippetStore.allTags + clipAutoTags)).sorted()
+        window.show(clips: historyStore.items, snippets: snippetStore.items, imageStore: imageStore, fileStore: fileStore, allTags: allTags)
     }
 
     private func createSearchWindow() -> SearchWindow {

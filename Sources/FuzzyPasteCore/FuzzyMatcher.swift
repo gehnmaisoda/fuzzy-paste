@@ -76,20 +76,34 @@ public enum FuzzyMatcher {
     /// スニペットは title, content, tags で検索し、高い方のスコアを採用。
     /// 画像・ファイルはファイル名で検索対象にする。
     /// クエリが空の場合、クリップ履歴のみを表示（スニペットは検索時のみ混合）。
-    /// tagFilters が指定された場合、全てのタグを持つスニペットのみ表示（クリップは除外）。
+    /// tagFilters が指定された場合、全てのタグを持つスニペット・クリップのみ表示。
+    /// クリップの autoTags もフィルタ対象に含む。
     public static func filterMixed(query: String, clips: [ClipItem], snippets: [SnippetItem], tagFilters: [String] = []) -> [SearchResultItem] {
         let activeSnippets = snippets.filter(\.hasContent)
         if !tagFilters.isEmpty {
-            let filtered = activeSnippets.filter { snippet in
-                tagFilters.allSatisfy { snippet.tags.contains($0) }
+            let filteredSnippets = activeSnippets.filter { snippet in
+                let allTags = snippet.content.autoTags + snippet.tags
+                return tagFilters.allSatisfy { allTags.contains($0) }
+            }
+            let filteredClips = clips.filter { clip in
+                let autoTags = clip.content.autoTags
+                guard !autoTags.isEmpty else { return false }
+                return tagFilters.allSatisfy { autoTags.contains($0) }
             }
             if query.isEmpty {
-                return filtered.map { .snippet($0) }
+                let snippetResults = filteredSnippets.map { SearchResultItem.snippet($0) }
+                let clipResults = filteredClips.map { SearchResultItem.clip($0) }
+                return clipResults + snippetResults
             }
             var scored: [(item: SearchResultItem, score: Double)] = []
-            for snippet in filtered {
+            for snippet in filteredSnippets {
                 let best = bestSnippetScore(query: query, snippet: snippet)
                 if let s = best { scored.append((.snippet(snippet), Double(s))) }
+            }
+            for clip in filteredClips {
+                if let s = clipSearchScore(query: query, clip: clip) {
+                    scored.append((.clip(clip), s))
+                }
             }
             return scored.sorted { $0.score > $1.score }.map(\.item)
         }
@@ -108,29 +122,8 @@ public enum FuzzyMatcher {
         var scored: [(item: SearchResultItem, score: Double)] = []
 
         for clip in clips {
-            switch clip.content {
-            case .text(let text):
-                if let score = match(query: query, target: text) {
-                    scored.append((.clip(clip), combinedScore(fuzzy: score, clip: clip)))
-                }
-            case .image(let meta):
-                // 画像は originalFileName と ocrText（行単位）を検索対象にする
-                var bestScore: Int?
-                if let name = meta.originalFileName,
-                   let s = match(query: query, target: name) {
-                    bestScore = s
-                }
-                if let ocr = meta.ocrText,
-                   let s = matchLines(query: query, target: ocr) {
-                    bestScore = max(bestScore ?? 0, s)
-                }
-                if let s = bestScore {
-                    scored.append((.clip(clip), combinedScore(fuzzy: s, clip: clip)))
-                }
-            case .file(let meta):
-                if let score = match(query: query, target: meta.originalFileName) {
-                    scored.append((.clip(clip), combinedScore(fuzzy: score, clip: clip)))
-                }
+            if let s = clipSearchScore(query: query, clip: clip) {
+                scored.append((.clip(clip), s))
             }
         }
 
@@ -255,5 +248,29 @@ public enum FuzzyMatcher {
             scores.append(match(query: query, target: tag))
         }
         return scores.compactMap { $0 }.max()
+    }
+
+    /// クリップアイテムの検索スコアを返す。マッチしなければ nil。
+    private static func clipSearchScore(query: String, clip: ClipItem) -> Double? {
+        switch clip.content {
+        case .text(let text):
+            guard let score = match(query: query, target: text) else { return nil }
+            return combinedScore(fuzzy: score, clip: clip)
+        case .image(let meta):
+            var bestScore: Int?
+            if let name = meta.originalFileName,
+               let s = match(query: query, target: name) {
+                bestScore = s
+            }
+            if let ocr = meta.ocrText,
+               let s = matchLines(query: query, target: ocr) {
+                bestScore = max(bestScore ?? 0, s)
+            }
+            guard let s = bestScore else { return nil }
+            return combinedScore(fuzzy: s, clip: clip)
+        case .file(let meta):
+            guard let score = match(query: query, target: meta.originalFileName) else { return nil }
+            return combinedScore(fuzzy: score, clip: clip)
+        }
     }
 }

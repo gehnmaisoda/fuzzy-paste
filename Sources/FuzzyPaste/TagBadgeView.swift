@@ -1,8 +1,36 @@
 import AppKit
 
-/// 角丸四角形のタグバッジ。オプションの×ボタン付き。
+/// 角丸四角形のタグバッジ。スタイルとオプションの×ボタンで外観を切り替える。
 @MainActor
 final class TagBadge: NSView {
+    enum Style {
+        /// ユーザー定義タグ（アクセントカラー）
+        case userTag
+        /// 自動付与タグ（teal カラー、編集不可）
+        case autoTag
+
+        var textColor: NSColor {
+            switch self {
+            case .userTag: .controlAccentColor
+            case .autoTag: .systemTeal
+            }
+        }
+
+        var backgroundColor: NSColor {
+            switch self {
+            case .userTag: .controlAccentColor.withAlphaComponent(0.12)
+            case .autoTag: .systemTeal.withAlphaComponent(0.12)
+            }
+        }
+
+        var fontWeight: NSFont.Weight {
+            switch self {
+            case .userTag: .medium
+            case .autoTag: .semibold
+            }
+        }
+    }
+
     private enum Const {
         static let hPad: CGFloat = 8
         static let vPad: CGFloat = 3
@@ -16,15 +44,15 @@ final class TagBadge: NSView {
     private var closeButton: NSButton?
     var onRemove: (() -> Void)?
 
-    init(text: String, showClose: Bool = false) {
+    init(text: String, style: Style = .userTag, showClose: Bool = false) {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Const.cornerRadius
-        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+        layer?.backgroundColor = style.backgroundColor.cgColor
         translatesAutoresizingMaskIntoConstraints = false
 
-        label.font = .systemFont(ofSize: Const.fontSize, weight: .medium)
-        label.textColor = .controlAccentColor
+        label.font = .systemFont(ofSize: Const.fontSize, weight: style.fontWeight)
+        label.textColor = style.textColor
         label.stringValue = text
         label.translatesAutoresizingMaskIntoConstraints = false
         label.setContentHuggingPriority(.required, for: .horizontal)
@@ -44,7 +72,7 @@ final class TagBadge: NSView {
             btn.target = self
             btn.action = #selector(closeTapped)
             btn.translatesAutoresizingMaskIntoConstraints = false
-            btn.contentTintColor = .controlAccentColor
+            btn.contentTintColor = style.textColor
             addSubview(btn)
             closeButton = btn
 
@@ -70,6 +98,7 @@ final class TagBadge: NSView {
 
 /// タグバッジをフローレイアウトで並べ、末尾に入力フィールドを配置するコンテナ。
 /// 角丸枠線で囲んだ input 風の見た目。タグ補完（サジェスト）対応。
+/// autoTags（編集不可）が左端、userTags（編集可）がその右に並ぶ。
 @MainActor
 final class TagFlowContainer: NSView, NSTextFieldDelegate {
     private enum Const {
@@ -93,6 +122,12 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
     /// 補完候補を提供するための全タグリスト。外部から設定する。
     var allKnownTags: [String] = []
     private var suggestedTag: String?
+
+    /// コンテンツ種別から自動付与されるタグ（編集不可、左端に表示）。
+    var autoTags: [String] = [] {
+        didSet { rebuildBadges() }
+    }
+    private var autoTagViews: [TagBadge] = []
 
     var tags: [String] = [] {
         didSet { rebuildBadges() }
@@ -137,8 +172,16 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
     }
 
     private func rebuildBadges() {
+        for badge in autoTagViews { badge.removeFromSuperview() }
+        autoTagViews.removeAll()
         for badge in badgeViews { badge.removeFromSuperview() }
         badgeViews.removeAll()
+
+        for tag in autoTags {
+            let badge = TagBadge(text: tag, style: .autoTag)
+            addSubview(badge)
+            autoTagViews.append(badge)
+        }
 
         for tag in tags {
             let badge = TagBadge(text: tag, showClose: true)
@@ -162,10 +205,10 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
         var y: CGFloat = Const.inset
         var lineHeight: CGFloat = 0
 
-        // バッジの高さを取得（バッジがあれば使う、なければ inputField 基準）
-        let badgeHeight: CGFloat = badgeViews.first?.fittingSize.height ?? 0
+        let allBadges: [TagBadge] = autoTagViews + badgeViews
+        let badgeHeight: CGFloat = allBadges.first?.fittingSize.height ?? 0
 
-        for badge in badgeViews {
+        for badge in allBadges {
             let size = badge.fittingSize
             if x - Const.inset + size.width > maxWidth && x > Const.inset {
                 x = Const.inset
@@ -213,9 +256,8 @@ final class TagFlowContainer: NSView, NSTextFieldDelegate {
             suggestionLabel.isHidden = true
             return
         }
-        let lower = input.lowercased()
         if let match = allKnownTags.first(where: {
-            $0.lowercased().hasPrefix(lower) && !tags.contains($0)
+            $0.hasPrefix(input) && !tags.contains($0)
         }) {
             suggestedTag = match
             suggestionLabel.stringValue = match

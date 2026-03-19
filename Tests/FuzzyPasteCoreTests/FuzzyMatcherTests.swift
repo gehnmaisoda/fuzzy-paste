@@ -393,8 +393,8 @@ struct FuzzyMatcherFilterMixedSnippetIdTests {
 // MARK: - filterMixed with tagFilters
 
 struct FuzzyMatcherFilterMixedTagTests {
-    @Test("Tag filter returns only snippets, excluding clips")
-    func tagFilterExcludesClips() {
+    @Test("Tag filter excludes text clips (no auto-tags)")
+    func tagFilterExcludesTextClips() {
         let clips = [makeClip("hello")]
         let snippets = [makeSnippet("snippet", tags: ["tag1"])]
         let results = FuzzyMatcher.filterMixed(query: "", clips: clips, snippets: snippets, tagFilters: ["tag1"])
@@ -412,5 +412,69 @@ struct FuzzyMatcherFilterMixedTagTests {
         let results = FuzzyMatcher.filterMixed(query: "hello", clips: [], snippets: snippets, tagFilters: ["greet"])
         #expect(results.count == 1)
         #expect(results[0].text == "content") // "hello world" snippet's content
+    }
+
+    @Test("Tag filter includes file clips with matching auto-tags")
+    func tagFilterIncludesFileClipsWithAutoTags() {
+        let pdfMeta = FileMetadata(fileName: "a.pdf", originalFileName: "doc.pdf", fileExtension: "pdf", utType: "com.adobe.pdf", fileSizeBytes: 100)
+        let pdfClip = ClipItem(id: UUID(), content: .file(pdfMeta), copiedAt: Date())
+        let textClip = makeClip("hello")
+        let results = FuzzyMatcher.filterMixed(query: "", clips: [pdfClip, textClip], snippets: [], tagFilters: ["pdf"])
+        #expect(results.count == 1)
+        #expect(results[0].clipItem != nil)
+    }
+
+    @Test("Tag filter includes image clips with 'img' auto-tag")
+    func tagFilterIncludesImageClips() {
+        let imgMeta = ImageMetadata(fileName: "a.png", originalUTType: "public.png", originalFileName: nil, pixelWidth: 100, pixelHeight: 100, fileSizeBytes: 50)
+        let imgClip = ClipItem(id: UUID(), content: .image(imgMeta), copiedAt: Date())
+        let results = FuzzyMatcher.filterMixed(query: "", clips: [imgClip], snippets: [], tagFilters: ["img"])
+        #expect(results.count == 1)
+    }
+}
+
+// MARK: - Auto-tag
+
+struct AutoTagTests {
+    @Test("Image content returns 'img' auto-tag")
+    func imageAutoTag() {
+        let content = ClipContent.image(ImageMetadata(fileName: "a.png", originalUTType: "public.png", originalFileName: nil, pixelWidth: 100, pixelHeight: 100, fileSizeBytes: 50))
+        #expect(content.autoTags == ["img"])
+    }
+
+    @Test("PDF file returns 'pdf' auto-tag")
+    func pdfAutoTag() {
+        let content = ClipContent.file(FileMetadata(fileName: "a.pdf", originalFileName: "doc.pdf", fileExtension: "pdf", utType: "com.adobe.pdf", fileSizeBytes: 100))
+        #expect(content.autoTags == ["pdf"])
+    }
+
+    @Test("CSV file returns 'csv' auto-tag")
+    func csvAutoTag() {
+        let content = ClipContent.file(FileMetadata(fileName: "a.csv", originalFileName: "data.csv", fileExtension: "csv", utType: "public.comma-separated-values-text", fileSizeBytes: 100))
+        #expect(content.autoTags == ["csv"])
+    }
+
+    @Test("JSON file returns 'json' auto-tag")
+    func jsonAutoTag() {
+        let content = ClipContent.file(FileMetadata(fileName: "a.json", originalFileName: "config.json", fileExtension: "json", utType: "public.json", fileSizeBytes: 100))
+        #expect(content.autoTags == ["json"])
+    }
+
+    @Test("Text content returns no auto-tags")
+    func textNoAutoTag() {
+        let content = ClipContent.text("hello")
+        #expect(content.autoTags.isEmpty)
+    }
+
+    @Test("Unknown file extension returns no auto-tags")
+    func unknownExtNoAutoTag() {
+        let content = ClipContent.file(FileMetadata(fileName: "a.xyz", originalFileName: "file.xyz", fileExtension: "xyz", utType: "public.data", fileSizeBytes: 100))
+        #expect(content.autoTags.isEmpty)
+    }
+
+    @Test("Extension matching is case-insensitive")
+    func caseInsensitive() {
+        #expect(AutoTag.tags(forExtension: "PDF") == ["pdf"])
+        #expect(AutoTag.tags(forExtension: "Json") == ["json"])
     }
 }
