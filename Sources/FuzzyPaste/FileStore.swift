@@ -36,20 +36,6 @@ final class FileStore {
         saveFile(data: data, originalFileName: originalFileName, targetDir: snippetAssetsDir)
     }
 
-    /// 外部ファイルをスニペットアセットにインポートする。
-    /// 成功時は新しいファイル名を返す。
-    func importFileForSnippet(from sourceURL: URL, fileExtension ext: String) -> String? {
-        guard let data = try? Data(contentsOf: sourceURL) else { return nil }
-        let newFileName = ext.isEmpty ? UUID().uuidString : "\(UUID().uuidString).\(ext)"
-        let destURL = snippetAssetsDir.appendingPathComponent(newFileName)
-        do {
-            try data.write(to: destURL, options: .atomic)
-        } catch {
-            return nil
-        }
-        return newFileName
-    }
-
     // MARK: - 読み取り（履歴・スニペット両方を探索）
 
     /// ファイルのフルパスを返す。履歴 → スニペットアセットの順で探索。

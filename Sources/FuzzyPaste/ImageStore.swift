@@ -45,21 +45,6 @@ final class ImageStore {
                   targetDir: snippetAssetsDir, targetThumbsDir: snippetThumbsDir)
     }
 
-    /// 外部ファイルをスニペットアセットにインポートし、サムネイルも生成する。
-    /// 成功時は新しいファイル名を返す。
-    func importImageForSnippet(from sourceURL: URL) -> String? {
-        guard let data = try? Data(contentsOf: sourceURL) else { return nil }
-        let newFileName = "\(UUID().uuidString).png"
-        let destURL = snippetAssetsDir.appendingPathComponent(newFileName)
-        do {
-            try data.write(to: destURL, options: .atomic)
-        } catch {
-            return nil
-        }
-        generateThumbnail(fileName: newFileName, sourceData: data, thumbsDir: snippetThumbsDir)
-        return newFileName
-    }
-
     // MARK: - 読み取り（履歴・スニペット両方を探索）
 
     /// サムネイル画像を返す。キャッシュ → 履歴 → スニペットアセットの順で探索。
