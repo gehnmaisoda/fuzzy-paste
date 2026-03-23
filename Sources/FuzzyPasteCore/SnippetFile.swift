@@ -89,23 +89,32 @@ public enum SnippetFile {
 
     /// 指定ディレクトリ内で衝突しないファイル名を生成する。
     /// 衝突時は `-2`, `-3` ... のサフィックスを付与する。
-    public static func uniqueFileName(for item: SnippetItem, in directory: URL) -> String {
+    /// `excluding` を指定すると、そのファイルは衝突対象から除外する（リネーム時に自分自身を除外するため）。
+    public static func uniqueFileName(for item: SnippetItem, in directory: URL, excluding: URL? = nil) -> String {
         let slug = FrontmatterParser.slug(from: item.title)
         let base = "\(slug).md"
         let fm = FileManager.default
 
-        if !fm.fileExists(atPath: directory.appendingPathComponent(base).path) {
+        if !isCollision(name: base, in: directory, excluding: excluding, fm: fm) {
             return base
         }
 
         var counter = 2
         while true {
             let candidate = "\(slug)-\(counter).md"
-            if !fm.fileExists(atPath: directory.appendingPathComponent(candidate).path) {
+            if !isCollision(name: candidate, in: directory, excluding: excluding, fm: fm) {
                 return candidate
             }
             counter += 1
         }
+    }
+
+    private static func isCollision(name: String, in directory: URL, excluding: URL?, fm: FileManager) -> Bool {
+        let url = directory.appendingPathComponent(name)
+        guard fm.fileExists(atPath: url.path) else { return false }
+        // excluding と同じパスなら衝突ではない（自分自身）
+        if let excluding, url.path == excluding.path { return false }
+        return true
     }
 
     // MARK: - Asset Resolution

@@ -297,8 +297,17 @@ public final class SnippetStore {
         let serialized = SnippetFile.serialize(item: item)
 
         if let existingURL = fileMap[item.id] {
-            // 既存ファイルに上書き
-            try? serialized.write(to: existingURL, atomically: true, encoding: .utf8)
+            // タイトル変更でファイル名が変わる場合はリネーム
+            let desiredName = SnippetFile.uniqueFileName(for: item, in: snippetsDir, excluding: existingURL)
+            let desiredURL = snippetsDir.appendingPathComponent(desiredName)
+
+            if existingURL.lastPathComponent != desiredName {
+                try? FileManager.default.removeItem(at: existingURL)
+                try? serialized.write(to: desiredURL, atomically: true, encoding: .utf8)
+                fileMap[item.id] = desiredURL
+            } else {
+                try? serialized.write(to: existingURL, atomically: true, encoding: .utf8)
+            }
         } else {
             // 新規ファイル作成
             let name = SnippetFile.uniqueFileName(for: item, in: snippetsDir)

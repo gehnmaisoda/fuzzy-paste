@@ -227,6 +227,39 @@ struct SnippetFileTests {
         #expect(name == "Test-2.md")
     }
 
+    @Test("uniqueFileName excluding self does not collide")
+    func uniqueFileNameExcludingSelf() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SnippetFileTest-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let selfURL = tempDir.appendingPathComponent("Test.md")
+        try "".write(to: selfURL, atomically: true, encoding: .utf8)
+
+        let item = SnippetItem(title: "Test", content: .text(""))
+        // excluding で自分自身を除外 → Test.md が返る
+        let name = SnippetFile.uniqueFileName(for: item, in: tempDir, excluding: selfURL)
+        #expect(name == "Test.md")
+    }
+
+    @Test("uniqueFileName excluding self still avoids other collisions")
+    func uniqueFileNameExcludingSelfWithOtherCollision() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SnippetFileTest-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let selfURL = tempDir.appendingPathComponent("Old-Name.md")
+        try "".write(to: selfURL, atomically: true, encoding: .utf8)
+        // Test.md は別のスニペットが使用中
+        try "".write(to: tempDir.appendingPathComponent("Test.md"), atomically: true, encoding: .utf8)
+
+        let item = SnippetItem(title: "Test", content: .text(""))
+        let name = SnippetFile.uniqueFileName(for: item, in: tempDir, excluding: selfURL)
+        #expect(name == "Test-2.md")
+    }
+
     // MARK: - Helpers
 
     /// Create a minimal valid 1x1 PNG for testing.
