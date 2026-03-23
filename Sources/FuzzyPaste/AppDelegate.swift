@@ -344,8 +344,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - ファイル変更監視
 
-    /// JSON ファイルの変更を定期チェックし、外部プロセス（CLI 等）による変更を自動リロードする。
-    /// ファイルの更新日時を比較し、自分の save 以外の変更のみリロードする。
+    /// ファイル/ディレクトリの変更を定期チェックし、外部プロセス（CLI 等）による変更を自動リロードする。
+    /// 更新日時を比較し、自分の save 以外の変更のみリロードする。
     private func startFileWatchers() {
         fileWatchTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
             Task { @MainActor [weak self] in

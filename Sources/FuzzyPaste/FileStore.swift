@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 /// ファイルの保存・アイコン取得・削除を担当するストア。
 ///
-/// 保存先: ~/Library/Application Support/FuzzyPaste/files/
+/// 保存先: ~/.config/fuzzy-paste/snippets/_assets/
 @MainActor
 final class FileStore {
     private let filesDir: URL
@@ -12,8 +12,7 @@ final class FileStore {
     private let iconCache = NSCache<NSString, NSImage>()
 
     init() {
-        filesDir = AppPaths.appSupportDir.appendingPathComponent("files")
-        try? FileManager.default.createDirectory(at: filesDir, withIntermediateDirectories: true)
+        filesDir = AppPaths.assetsDir
         iconCache.countLimit = 100
     }
 

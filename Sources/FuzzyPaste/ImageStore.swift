@@ -4,8 +4,8 @@ import ImageIO
 
 /// 画像ファイルの保存・読み込み・サムネイル生成を担当するストア。
 ///
-/// 保存先: ~/Library/Application Support/FuzzyPaste/images/
-/// サムネイル: ~/Library/Application Support/FuzzyPaste/images/thumbs/
+/// 保存先: ~/.config/fuzzy-paste/snippets/_assets/
+/// サムネイル: ~/.config/fuzzy-paste/snippets/_assets/thumbs/
 @MainActor
 final class ImageStore {
     private let imagesDir: URL
@@ -16,10 +16,8 @@ final class ImageStore {
     private static let thumbMaxPixels = 512
 
     init() {
-        imagesDir = AppPaths.appSupportDir.appendingPathComponent("images")
-        thumbsDir = imagesDir.appendingPathComponent("thumbs")
-        try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: thumbsDir, withIntermediateDirectories: true)
+        imagesDir = AppPaths.assetsDir
+        thumbsDir = AppPaths.thumbsDir
         thumbCache.countLimit = 200
     }
 
