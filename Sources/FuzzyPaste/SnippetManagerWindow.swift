@@ -2047,11 +2047,11 @@ final class SnippetManagerWindow: NSWindow, NSTableViewDataSource, NSTableViewDe
 
         if isImage {
             let utType = UTType(filenameExtension: url.pathExtension)?.identifier ?? "public.image"
-            guard let metadata = imageStore.save(data: data, utType: utType, originalFileName: originalFileName) else { return }
+            guard let metadata = imageStore.saveForSnippet(data: data, utType: utType, originalFileName: originalFileName) else { return }
             store.update(id: item.id, title: item.title, content: .image(metadata), tags: item.tags)
             typeSegment.selectedSegment = 1
         } else {
-            guard let metadata = fileStore.save(data: data, originalFileName: originalFileName) else { return }
+            guard let metadata = fileStore.saveForSnippet(data: data, originalFileName: originalFileName) else { return }
             store.update(id: item.id, title: item.title, content: .file(metadata), tags: item.tags)
         }
 

@@ -367,16 +367,21 @@ extension FPaste.History {
         func run() async throws {
             let store = await HistoryStore()
 
+            // 履歴のアセットは ~/Library/Application Support/ に保存（スニペットと分離）
+            let historyImagesDir = AppPaths.appSupportDir.appendingPathComponent("images")
+            let historyThumbsDir = historyImagesDir.appendingPathComponent("thumbs")
+            let historyFilesDir = AppPaths.appSupportDir.appendingPathComponent("files")
+
             if let text {
                 await store.add(text)
                 print("履歴に追加しました（テキスト）")
             } else if let imagePath = image {
                 let meta = try saveImageFile(
-                    path: imagePath, imagesDir: AppPaths.assetsDir, thumbsDir: AppPaths.thumbsDir)
+                    path: imagePath, imagesDir: historyImagesDir, thumbsDir: historyThumbsDir)
                 await store.addImage(meta)
                 print("履歴に追加しました（画像: \(meta.pixelWidth)×\(meta.pixelHeight)）")
             } else if let filePath = file {
-                let meta = try saveGenericFile(path: filePath, filesDir: AppPaths.assetsDir)
+                let meta = try saveGenericFile(path: filePath, filesDir: historyFilesDir)
                 await store.addFile(meta)
                 print("履歴に追加しました（ファイル: \(meta.originalFileName)）")
             }

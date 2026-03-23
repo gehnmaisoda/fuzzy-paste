@@ -135,7 +135,7 @@ public final class SnippetStore {
     // MARK: - Import / Export
 
     /// snippets ディレクトリを ZIP にエクスポートする。
-    /// .md ファイルと _assets/ を含む。
+    /// .md ファイルと assets/ を含む。
     public func exportToZip(url: URL) throws {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
@@ -149,12 +149,12 @@ public final class SnippetStore {
     }
 
     /// ZIP ファイルからスニペットをインポートする。
-    /// .md ファイルと _assets/ をマージ。ID 重複はスキップ。
+    /// .md ファイルと assets/ をマージ。ID 重複はスキップ。
     public func importFromZip(url: URL) throws -> (imported: Int, skipped: Int) {
         let (newItems, duplicates, tempDir) = try extractAndClassify(zipURL: url)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let tempAssetsDir = tempDir.appendingPathComponent("_assets")
+        let tempAssetsDir = tempDir.appendingPathComponent("assets")
         let fm = FileManager.default
 
         for item in newItems {
@@ -207,7 +207,7 @@ public final class SnippetStore {
                           userInfo: [NSLocalizedDescriptionKey: "ZIP ファイルの展開に失敗しました"])
         }
 
-        let tempAssetsDir = tempDir.appendingPathComponent("_assets")
+        let tempAssetsDir = tempDir.appendingPathComponent("assets")
         let existingIDs = Set(items.map { $0.id })
         var newItems: [SnippetItem] = []
         var duplicates: [SnippetItem] = []
@@ -321,7 +321,7 @@ public final class SnippetStore {
 
     private func isDirectoryEmpty(_ url: URL) -> Bool {
         let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
-        // _assets ディレクトリのみの場合も空とみなす
+        // assets ディレクトリのみの場合も空とみなす
         let mdFiles = contents?.filter { $0.pathExtension.lowercased() == "md" }
         return mdFiles?.isEmpty ?? true
     }

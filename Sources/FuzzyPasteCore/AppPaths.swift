@@ -30,14 +30,14 @@ public enum AppPaths {
         return dir
     }()
 
-    /// ~/.config/fuzzy-paste/snippets/_assets/ — 画像・ファイルアセット
+    /// ~/.config/fuzzy-paste/snippets/assets/ — 画像・ファイルアセット
     public static let assetsDir: URL = {
-        let dir = snippetsDir.appendingPathComponent("_assets")
+        let dir = snippetsDir.appendingPathComponent("assets")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
 
-    /// ~/.config/fuzzy-paste/snippets/_assets/thumbs/ — サムネイル
+    /// ~/.config/fuzzy-paste/snippets/assets/thumbs/ — サムネイル
     public static let thumbsDir: URL = {
         let dir = assetsDir.appendingPathComponent("thumbs")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
