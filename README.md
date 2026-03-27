@@ -4,6 +4,12 @@
 
 [Clipy](https://github.com/Clipy/Clipy) にインスパイアされつつ、モダンな UI と豊富な機能を備えた次世代クリップボードツール。
 
+## ダウンロード
+
+[![Download app for macOS](Resources/download-macos.svg)](https://github.com/gehnmaisoda/fuzzy-paste/releases/latest)
+
+> 署名なしのため、初回起動時は .app を右クリック →「開く」で起動してください。
+
 ## ハイライト
 
 - **Fuzzy Search** — 数文字タイプするだけで履歴を瞬時に絞り込み

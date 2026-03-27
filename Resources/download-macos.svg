@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="64" viewBox="0 0 220 64">
+  <rect width="220" height="64" rx="12" fill="#000"/>
+  <!-- Apple logo -->
+  <g transform="translate(24, 14) scale(0.035)" fill="#fff">
+    <path d="M640 530q0 68-37 132t-78 108q-47 50-82 50-22 0-68-18t-72-18q-24 0-67 19t-65 19q-44 0-97-59Q28 706 14 630T0 498q0-122 58-199t147-77q30 0 71 17t66 17q20 0 60-18t73-18q78 0 136 63-70 42-70 133 0 76 55 124t73 54zM484 128q0 46-28 96t-72 82q-49 38-85 38-3-22-3-33 0-56 33-111t73-87q25-18 55-28t48-12q1 10 1 22z"/>
+  </g>
+  <!-- Text -->
+  <text x="72" y="27" fill="#fff" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif" font-size="11" font-weight="400">Download app for</text>
+  <text x="72" y="49" fill="#fff" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif" font-size="22" font-weight="600">macOS</text>
+</svg>
