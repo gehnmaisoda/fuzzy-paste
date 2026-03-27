@@ -356,23 +356,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func checkFileChanges() {
         let fm = FileManager.default
-        let targets: [(url: URL, lastSave: Date, reload: () -> Void)] = [
+
+        // 履歴・設定: 単一ファイルの mod date を監視
+        let fileTargets: [(url: URL, lastSave: Date, reload: () -> Void)] = [
             (historyStore.monitoredFileURL, historyStore.lastSaveDate, { [weak self] in self?.historyStore.reload() }),
-            (snippetStore.monitoredFileURL, snippetStore.lastSaveDate, { [weak self] in self?.snippetStore.reload() }),
             (preferencesStore.monitoredFileURL, preferencesStore.lastSaveDate, { [weak self] in self?.preferencesStore.reload() }),
         ]
 
-        for target in targets {
+        for target in fileTargets {
             let key = target.url.lastPathComponent
             guard let attrs = try? fm.attributesOfItem(atPath: target.url.path),
                   let modDate = attrs[.modificationDate] as? Date else { continue }
             let lastKnown = lastKnownModDates[key] ?? .distantPast
             if modDate > lastKnown {
                 lastKnownModDates[key] = modDate
-                // 自分の save による変更は無視
                 if Date().timeIntervalSince(target.lastSave) > 1 {
                     target.reload()
                 }
+            }
+        }
+
+        // スニペット: ディレクトリ内の .md ファイルを個別に mod date チェック
+        // ディレクトリの mod date はファイル追加/削除時のみ変わり、
+        // 既存ファイルの編集では変わらないため、各ファイルを個別に確認する。
+        if Date().timeIntervalSince(snippetStore.lastSaveDate) > 1 {
+            checkSnippetFileChanges(fm: fm)
+        }
+    }
+
+    /// snippets ディレクトリ内の .md ファイルの mod date を個別チェックし、
+    /// 変更があれば reload する。
+    private func checkSnippetFileChanges(fm: FileManager) {
+        let dir = snippetStore.monitoredFileURL
+        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+
+        let mdFiles = files.filter { $0.pathExtension.lowercased() == "md" }
+
+        // ファイル数の変化（追加/削除）を検出
+        let currentCount = mdFiles.count
+        let lastCount = lastKnownModDates["snippets-count"].flatMap { Int($0.timeIntervalSince1970) } ?? -1
+        if currentCount != lastCount {
+            lastKnownModDates["snippets-count"] = Date(timeIntervalSince1970: Double(currentCount))
+            snippetStore.reload()
+            // reload 後に全ファイルの mod date を更新
+            updateSnippetModDates(mdFiles, fm: fm)
+            return
+        }
+
+        // 各ファイルの mod date をチェック
+        for fileURL in mdFiles {
+            let key = "snippet:\(fileURL.lastPathComponent)"
+            guard let attrs = try? fm.attributesOfItem(atPath: fileURL.path),
+                  let modDate = attrs[.modificationDate] as? Date else { continue }
+            let lastKnown = lastKnownModDates[key] ?? .distantPast
+            if modDate > lastKnown {
+                lastKnownModDates[key] = modDate
+                snippetStore.reload()
+                updateSnippetModDates(mdFiles, fm: fm)
+                return
+            }
+        }
+    }
+
+    /// 全 .md ファイルの mod date をキャッシュに記録する。
+    private func updateSnippetModDates(_ files: [URL], fm: FileManager) {
+        for fileURL in files {
+            let key = "snippet:\(fileURL.lastPathComponent)"
+            if let attrs = try? fm.attributesOfItem(atPath: fileURL.path),
+               let modDate = attrs[.modificationDate] as? Date {
+                lastKnownModDates[key] = modDate
             }
         }
     }
