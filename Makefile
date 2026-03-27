@@ -58,6 +58,7 @@ seed:
 dist:
 	swift build -c release
 	$(make_bundle_only)
+	codesign --force --deep -s - $(APP_BUNDLE)
 	rm -f $(DMG_NAME)
 	create-dmg \
 		--volname "$(APP_NAME)" \
