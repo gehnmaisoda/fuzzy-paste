@@ -6,7 +6,7 @@ APP_BUNDLE = $(APP_NAME).app
 DMG_NAME = $(APP_NAME).dmg
 DEV_FLAGS = -Xswiftc -DDEV
 
-.PHONY: run test relaunch relaunch_release hard_reset clean seed dist
+.PHONY: run test relaunch relaunch_release hard_reset hard_reset_release clean seed dist
 
 define make_bundle
 	rm -rf $(APP_BUNDLE)
@@ -50,6 +50,15 @@ hard_reset:
 	tccutil reset Accessibility $(BUNDLE_ID)
 	rm -rf ~/Library/Application\ Support/FuzzyPaste-Dev
 	@echo "Hard reset complete"
+
+# リリースビルドを初回インストール状態に戻す（オンボーディング再確認等に使用）
+# スニペット (~/.config/fuzzy-paste/snippets/) は保持される
+hard_reset_release:
+	-pkill -x $(APP_NAME)
+	rm -rf /Applications/$(APP_BUNDLE)
+	rm -rf ~/Library/Application\ Support/FuzzyPaste
+	tccutil reset Accessibility $(BUNDLE_ID)
+	@echo "Release hard reset complete (snippets preserved)"
 
 seed:
 	swift build $(DEV_FLAGS)
