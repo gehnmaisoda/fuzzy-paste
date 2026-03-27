@@ -52,7 +52,7 @@ struct HistorySettingsView: View {
                 } message: {
                     Text("この操作は取り消せません。\(historyCount) 件の履歴がすべて削除されます。")
                 }
-                Text("画像・ファイルの実体も削除されます")
+                Text("スニペットは削除されません")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

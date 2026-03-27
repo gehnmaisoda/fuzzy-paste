@@ -49,7 +49,38 @@ public enum ClipContent: Sendable, Equatable {
     case file(FileMetadata)
 }
 
-extension ClipContent: Codable {}
+extension ClipContent: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case text, image, file
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.text) {
+            self = .text(try container.decode(String.self, forKey: .text))
+        } else if container.contains(.image) {
+            self = .image(try container.decode(ImageMetadata.self, forKey: .image))
+        } else if container.contains(.file) {
+            self = .file(try container.decode(FileMetadata.self, forKey: .file))
+        } else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "ClipContent: no known key (text/image/file)"))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let value):
+            try container.encode(value, forKey: .text)
+        case .image(let meta):
+            try container.encode(meta, forKey: .image)
+        case .file(let meta):
+            try container.encode(meta, forKey: .file)
+        }
+    }
+}
 
 extension ClipContent {
     /// コンテンツ種別から自動付与されるタグ。テキストは空。
