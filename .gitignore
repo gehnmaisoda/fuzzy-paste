@@ -1,6 +1,7 @@
 .build/
 .swiftpm/
 FuzzyPaste.app/
+*.dmg
 *.xcodeproj/
 *.xcworkspace/
 DerivedData/
