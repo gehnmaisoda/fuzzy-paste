@@ -16,8 +16,8 @@ struct FPaste: AsyncParsableCommand {
 
 // MARK: - 共通ファイル操作
 
-/// 画像ファイルを images/ に保存し、サムネイルも生成して ImageMetadata を返す。
-private func saveImageFile(path: String) throws -> ImageMetadata {
+/// 画像ファイルを指定ディレクトリに保存し、サムネイルも生成して ImageMetadata を返す。
+private func saveImageFile(path: String, imagesDir: URL, thumbsDir: URL) throws -> ImageMetadata {
     let url = URL(fileURLWithPath: path)
     let fm = FileManager.default
     guard fm.fileExists(atPath: url.path) else {
@@ -25,8 +25,6 @@ private func saveImageFile(path: String) throws -> ImageMetadata {
     }
 
     let data = try Data(contentsOf: url)
-    let imagesDir = AppPaths.appSupportDir.appendingPathComponent("images")
-    let thumbsDir = imagesDir.appendingPathComponent("thumbs")
     try? fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
     try? fm.createDirectory(at: thumbsDir, withIntermediateDirectories: true)
 
@@ -69,8 +67,8 @@ private func saveImageFile(path: String) throws -> ImageMetadata {
     )
 }
 
-/// ファイルを files/ にコピーして FileMetadata を返す。
-private func saveGenericFile(path: String) throws -> FileMetadata {
+/// ファイルを指定ディレクトリにコピーして FileMetadata を返す。
+private func saveGenericFile(path: String, filesDir: URL) throws -> FileMetadata {
     let url = URL(fileURLWithPath: path)
     let fm = FileManager.default
     guard fm.fileExists(atPath: url.path) else {
@@ -78,7 +76,6 @@ private func saveGenericFile(path: String) throws -> FileMetadata {
     }
 
     let data = try Data(contentsOf: url)
-    let filesDir = AppPaths.appSupportDir.appendingPathComponent("files")
     try? fm.createDirectory(at: filesDir, withIntermediateDirectories: true)
 
     let ext = url.pathExtension.lowercased()
@@ -200,9 +197,10 @@ extension FPaste {
             let snippetContent: SnippetContent
 
             if let imagePath = image {
-                snippetContent = .image(try saveImageFile(path: imagePath))
+                snippetContent = .image(try saveImageFile(
+                    path: imagePath, imagesDir: AppPaths.assetsDir, thumbsDir: AppPaths.thumbsDir))
             } else if let filePath = file {
-                snippetContent = .file(try saveGenericFile(path: filePath))
+                snippetContent = .file(try saveGenericFile(path: filePath, filesDir: AppPaths.assetsDir))
             } else if let content {
                 snippetContent = .text(content)
             } else {
@@ -369,15 +367,21 @@ extension FPaste.History {
         func run() async throws {
             let store = await HistoryStore()
 
+            // 履歴のアセットは ~/Library/Application Support/ に保存（スニペットと分離）
+            let historyImagesDir = AppPaths.appSupportDir.appendingPathComponent("images")
+            let historyThumbsDir = historyImagesDir.appendingPathComponent("thumbs")
+            let historyFilesDir = AppPaths.appSupportDir.appendingPathComponent("files")
+
             if let text {
                 await store.add(text)
                 print("履歴に追加しました（テキスト）")
             } else if let imagePath = image {
-                let meta = try saveImageFile(path: imagePath)
+                let meta = try saveImageFile(
+                    path: imagePath, imagesDir: historyImagesDir, thumbsDir: historyThumbsDir)
                 await store.addImage(meta)
                 print("履歴に追加しました（画像: \(meta.pixelWidth)×\(meta.pixelHeight)）")
             } else if let filePath = file {
-                let meta = try saveGenericFile(path: filePath)
+                let meta = try saveGenericFile(path: filePath, filesDir: historyFilesDir)
                 await store.addFile(meta)
                 print("履歴に追加しました（ファイル: \(meta.originalFileName)）")
             }
@@ -424,58 +428,21 @@ extension FPaste {
     struct Import: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "import",
-            abstract: "スニペットをインポート（ZIP バンドルまたは JSON）"
+            abstract: "スニペットをインポート（ZIP バンドル）"
         )
 
-        @Argument(help: "インポートするファイルのパス（.zip / .json / \"-\" で stdin JSON）")
+        @Argument(help: "インポートする ZIP ファイルのパス")
         var file: String
 
         func run() async throws {
+            let url = URL(fileURLWithPath: file)
             let fm = FileManager.default
-            let isBundle: Bool
-            let jsonData: Data
-            var bundleTempDir: URL?
-
-            if file == "-" || file == "/dev/stdin" {
-                isBundle = false
-                jsonData = FileHandle.standardInput.readDataToEndOfFile()
-            } else {
-                let url = URL(fileURLWithPath: file)
-                guard fm.fileExists(atPath: url.path) else {
-                    throw ValidationError("ファイルが見つかりません: \(file)")
-                }
-
-                let ext = url.pathExtension.lowercased()
-                isBundle = ext == "zip" || ext == "fuzzypaste"
-
-                if isBundle {
-                    let tempDir = fm.temporaryDirectory
-                        .appendingPathComponent("FuzzyPaste-import-\(UUID().uuidString)")
-                    try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
-                    bundleTempDir = tempDir
-
-                    let proc = Process()
-                    proc.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-                    proc.arguments = ["-x", "-k", url.path, tempDir.path]
-                    try proc.run()
-                    proc.waitUntilExit()
-                    guard proc.terminationStatus == 0 else {
-                        throw ValidationError("ZIP ファイルの展開に失敗しました")
-                    }
-                    let jsonURL = tempDir.appendingPathComponent("snippets.json")
-                    guard fm.fileExists(atPath: jsonURL.path) else {
-                        throw ValidationError("バンドル内に snippets.json が見つかりません")
-                    }
-                    jsonData = try Data(contentsOf: jsonURL)
-                } else {
-                    jsonData = try Data(contentsOf: url)
-                }
+            guard fm.fileExists(atPath: url.path) else {
+                throw ValidationError("ファイルが見つかりません: \(file)")
             }
 
-            defer { if let dir = bundleTempDir { try? fm.removeItem(at: dir) } }
-
             let store = await SnippetStore()
-            let result = try await store.parseImportData(jsonData)
+            let result = try await store.parseImportZip(url: url)
 
             // プレビュー表示
             print("--- インポートプレビュー ---")
@@ -485,51 +452,9 @@ extension FPaste {
             for item in result.duplicates { print("  = \(item.title)") }
 
             if !result.new.isEmpty {
-                if let tempDir = bundleTempDir {
-                    let mapping = copyBundleFiles(from: tempDir, items: result.new)
-                    await store.importItems(result.new, fileNameMapping: mapping)
-                } else {
-                    await store.importItems(result.new)
-                }
-                print("\n\(result.new.count) 件インポートしました。")
+                let importResult = try await store.importFromZip(url: url)
+                print("\n\(importResult.imported) 件インポートしました。")
             }
-        }
-
-        /// バンドルから画像・ファイルの実体をアプリのデータディレクトリにコピーし、ファイル名マッピングを返す。
-        private func copyBundleFiles(from bundleDir: URL, items: [SnippetItem]) -> [String: String] {
-            let fm = FileManager.default
-            let base = AppPaths.appSupportDir
-            let imagesDir = base.appendingPathComponent("images")
-            let filesDir = base.appendingPathComponent("files")
-            try? fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
-            try? fm.createDirectory(at: filesDir, withIntermediateDirectories: true)
-
-            let bundleImagesDir = bundleDir.appendingPathComponent("images")
-            let bundleFilesDir = bundleDir.appendingPathComponent("files")
-
-            var mapping: [String: String] = [:]
-            for item in items {
-                switch item.content {
-                case .image(let meta):
-                    let src = bundleImagesDir.appendingPathComponent(meta.fileName)
-                    guard fm.fileExists(atPath: src.path) else { continue }
-                    let newName = "\(UUID().uuidString).png"
-                    let dst = imagesDir.appendingPathComponent(newName)
-                    try? fm.copyItem(at: src, to: dst)
-                    mapping[meta.fileName] = newName
-                case .file(let meta):
-                    let src = bundleFilesDir.appendingPathComponent(meta.fileName)
-                    guard fm.fileExists(atPath: src.path) else { continue }
-                    let ext = meta.fileExtension
-                    let newName = ext.isEmpty ? UUID().uuidString : "\(UUID().uuidString).\(ext)"
-                    let dst = filesDir.appendingPathComponent(newName)
-                    try? fm.copyItem(at: src, to: dst)
-                    mapping[meta.fileName] = newName
-                case .text:
-                    break
-                }
-            }
-            return mapping
         }
     }
 }
@@ -538,10 +463,10 @@ extension FPaste {
 
 extension FPaste {
     struct Export: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "スニペットをエクスポート（ZIP バンドルまたは JSON）")
+        static let configuration = CommandConfiguration(abstract: "スニペットを ZIP にエクスポート")
 
-        @Option(name: .shortAndLong, help: "出力ファイルパス（省略時は stdout に JSON）")
-        var output: String?
+        @Option(name: .shortAndLong, help: "出力ファイルパス（.zip）")
+        var output: String
 
         func run() async throws {
             let store = await SnippetStore()
@@ -552,79 +477,9 @@ extension FPaste {
                 return
             }
 
-            let hasMedia = items.contains {
-                switch $0.content {
-                case .image, .file: return true
-                case .text: return false
-                }
-            }
-
-            if let output = output, hasMedia {
-                try await exportBundle(store: store, items: items, to: URL(fileURLWithPath: output))
-                print("エクスポートしました: \(output)")
-            } else {
-                let data = try await store.exportData()
-                if let output = output {
-                    let url = URL(fileURLWithPath: output)
-                    try data.write(to: url, options: .atomic)
-                    print("エクスポートしました: \(output)")
-                } else {
-                    if hasMedia {
-                        FileHandle.standardError.write(Data("警告: 画像/ファイルスニペットを含みますが、stdout には JSON のみ出力します。\nバンドル形式でエクスポートするには -o output.zip を指定してください。\n".utf8))
-                    }
-                    FileHandle.standardOutput.write(data)
-                    FileHandle.standardOutput.write(Data("\n".utf8))
-                }
-            }
-        }
-
-        private func exportBundle(store: SnippetStore, items: [SnippetItem], to url: URL) async throws {
-            let fm = FileManager.default
-            let base = AppPaths.appSupportDir
-            let appImagesDir = base.appendingPathComponent("images")
-            let appFilesDir = base.appendingPathComponent("files")
-
-            let tempDir = fm.temporaryDirectory
-                .appendingPathComponent("FuzzyPaste-export-\(UUID().uuidString)")
-            try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            defer { try? fm.removeItem(at: tempDir) }
-
-            // snippets.json
-            let jsonData = try await store.exportData()
-            try jsonData.write(to: tempDir.appendingPathComponent("snippets.json"), options: .atomic)
-
-            // 画像・ファイルの実体をコピー
-            let bundleImagesDir = tempDir.appendingPathComponent("images")
-            let bundleFilesDir = tempDir.appendingPathComponent("files")
-            try? fm.createDirectory(at: bundleImagesDir, withIntermediateDirectories: true)
-            try? fm.createDirectory(at: bundleFilesDir, withIntermediateDirectories: true)
-
-            for item in items {
-                switch item.content {
-                case .image(let meta):
-                    let src = appImagesDir.appendingPathComponent(meta.fileName)
-                    if fm.fileExists(atPath: src.path) {
-                        try fm.copyItem(at: src, to: bundleImagesDir.appendingPathComponent(meta.fileName))
-                    }
-                case .file(let meta):
-                    let src = appFilesDir.appendingPathComponent(meta.fileName)
-                    if fm.fileExists(atPath: src.path) {
-                        try fm.copyItem(at: src, to: bundleFilesDir.appendingPathComponent(meta.fileName))
-                    }
-                case .text:
-                    break
-                }
-            }
-
-            // ditto で ZIP 作成
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-            proc.arguments = ["-c", "-k", "--sequesterRsrc", tempDir.path, url.path]
-            try proc.run()
-            proc.waitUntilExit()
-            guard proc.terminationStatus == 0 else {
-                throw ValidationError("ZIP ファイルの作成に失敗しました")
-            }
+            let url = URL(fileURLWithPath: output)
+            try await store.exportToZip(url: url)
+            print("エクスポートしました: \(output) (\(items.count) 件)")
         }
     }
 }

@@ -16,28 +16,6 @@ extension SnippetContent {
         case .file(let meta): return AutoTag.tags(forExtension: meta.fileExtension)
         }
     }
-
-    /// ファイル名マッピングを適用した新しい SnippetContent を返す。
-    /// テキストの場合はそのまま返す。
-    func remappingFileName(_ mapping: [String: String]) -> SnippetContent {
-        switch self {
-        case .text:
-            return self
-        case .image(let meta):
-            guard let newName = mapping[meta.fileName] else { return self }
-            return .image(ImageMetadata(
-                fileName: newName, originalUTType: meta.originalUTType,
-                originalFileName: meta.originalFileName,
-                pixelWidth: meta.pixelWidth, pixelHeight: meta.pixelHeight,
-                fileSizeBytes: meta.fileSizeBytes))
-        case .file(let meta):
-            guard let newName = mapping[meta.fileName] else { return self }
-            return .file(FileMetadata(
-                fileName: newName, originalFileName: meta.originalFileName,
-                fileExtension: meta.fileExtension, utType: meta.utType,
-                fileSizeBytes: meta.fileSizeBytes))
-        }
-    }
 }
 
 /// スニペットアイテム。title と content で登録し、両方で検索可能。
@@ -83,34 +61,31 @@ public struct SnippetItem: Codable, Identifiable, Sendable {
     }
 }
 
-/// エクスポート用ラッパー。バージョン情報と日時を付与して JSON に書き出す。
-public struct SnippetExportData: Codable, Sendable {
-    public let version: String
-    public let exportedAt: Date
-    public let snippets: [SnippetItem]
-
-    public init(version: String, exportedAt: Date, snippets: [SnippetItem]) {
-        self.version = version
-        self.exportedAt = exportedAt
-        self.snippets = snippets
-    }
-}
-
 /// スニペットの永続化ストア。
-/// 保存先: ~/Library/Application Support/FuzzyPaste/snippets.json
+/// 保存先: ~/.config/fuzzy-paste/snippets/ (1スニペット = 1 .md ファイル)
 @MainActor
 public final class SnippetStore {
     public private(set) var items: [SnippetItem] = []
-    private let fileURL: URL
+    private let snippetsDir: URL
+    private let assetsDir: URL
+    /// スニペット ID → .md ファイルパスのマッピング
+    private var fileMap: [UUID: URL] = [:]
 
     public init() {
-        let dir = AppPaths.appSupportDir
-        fileURL = dir.appendingPathComponent("snippets.json")
-        let isFirstLaunch = !FileManager.default.fileExists(atPath: fileURL.path)
-        load()
+        snippetsDir = AppPaths.snippetsDir
+        assetsDir = AppPaths.assetsDir
+        let isFirstLaunch = isDirectoryEmpty(snippetsDir)
+        loadAll()
         if isFirstLaunch && items.isEmpty {
             seedDefaults()
         }
+    }
+
+    /// テスト用: 任意のディレクトリで初期化
+    public init(snippetsDir: URL, assetsDir: URL) {
+        self.snippetsDir = snippetsDir
+        self.assetsDir = assetsDir
+        loadAll()
     }
 
     /// 画像ファイル削除用コールバック。AppDelegate が設定する。
@@ -119,15 +94,17 @@ public final class SnippetStore {
     public var onFileDelete: ((String) -> Void)?
 
     public func add(title: String, content: SnippetContent, tags: [String] = []) {
-        items.insert(SnippetItem(title: title, content: content, tags: tags), at: 0)
-        save()
+        let item = SnippetItem(title: title, content: content, tags: tags)
+        items.insert(item, at: 0)
+        saveItem(item)
     }
 
     public func update(id: UUID, title: String, content: SnippetContent, tags: [String] = []) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         let old = items[index]
-        items[index] = SnippetItem(id: old.id, title: title, content: content, tags: tags, createdAt: old.createdAt)
-        save()
+        let updated = SnippetItem(id: old.id, title: title, content: content, tags: tags, createdAt: old.createdAt)
+        items[index] = updated
+        saveItem(updated)
     }
 
     /// 全スニペットのタグ（ユーザータグ + autoTags）を重複排除・ソートして返す
@@ -146,125 +123,215 @@ public final class SnippetStore {
         case .text:
             break
         }
+        // .md ファイルを削除
+        if let fileURL = fileMap[id] {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        fileMap.removeValue(forKey: id)
         items.remove(at: index)
-        save()
+        lastSaveDate = Date()
     }
 
     // MARK: - Import / Export
 
-    /// 全スニペットを JSON Data にエクスポートする。
-    public func exportData() throws -> Data {
-        let exportData = SnippetExportData(version: "1.0", exportedAt: Date(), snippets: items)
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(exportData)
+    /// snippets ディレクトリを ZIP にエクスポートする。
+    /// .md ファイルと assets/ を含む。
+    public func exportToZip(url: URL) throws {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        proc.arguments = ["-c", "-k", "--sequesterRsrc", snippetsDir.path, url.path]
+        try proc.run()
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else {
+            throw NSError(domain: "SnippetStore", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "ZIP ファイルの作成に失敗しました"])
+        }
     }
 
-    /// 全スニペットを JSON ファイルにエクスポートする。
-    public func exportToFile(url: URL) throws {
-        let data = try exportData()
-        try data.write(to: url, options: .atomic)
-    }
+    /// ZIP ファイルからスニペットをインポートする。
+    /// .md ファイルと assets/ をマージ。ID 重複はスキップ。
+    public func importFromZip(url: URL) throws -> (imported: Int, skipped: Int) {
+        let (newItems, duplicates, tempDir) = try extractAndClassify(zipURL: url)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    /// JSON データを読み込み、新規と重複に分類して返す。
-    /// ラッパー形式 (`SnippetExportData`) と生配列 (`[SnippetItem]`) の両方に対応。
-    /// 重複判定: title + content が既存アイテムと一致するかどうか。
-    public func parseImportData(_ data: Data) throws -> (new: [SnippetItem], duplicates: [SnippetItem]) {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        let tempAssetsDir = tempDir.appendingPathComponent("assets")
+        let fm = FileManager.default
 
-        let imported: [SnippetItem]
-        if let wrapped = try? decoder.decode(SnippetExportData.self, from: data) {
-            imported = wrapped.snippets
-        } else {
-            imported = try decoder.decode([SnippetItem].self, from: data)
+        for item in newItems {
+            // アセットをコピー
+            if let assetName = assetFileName(for: item) {
+                let src = tempAssetsDir.appendingPathComponent(assetName)
+                let dst = assetsDir.appendingPathComponent(assetName)
+                if fm.fileExists(atPath: src.path) && !fm.fileExists(atPath: dst.path) {
+                    try? fm.copyItem(at: src, to: dst)
+                }
+            }
+
+            // .md ファイルを保存
+            let destName = SnippetFile.uniqueFileName(for: item, in: snippetsDir)
+            let destURL = snippetsDir.appendingPathComponent(destName)
+            let serialized = SnippetFile.serialize(item: item)
+            try? serialized.write(to: destURL, atomically: true, encoding: .utf8)
+            fileMap[item.id] = destURL
+            items.insert(item, at: 0)
         }
 
-        let existingKeys = Set(items.map { duplicateKey(for: $0) })
+        if !newItems.isEmpty {
+            lastSaveDate = Date()
+        }
+        return (imported: newItems.count, skipped: duplicates.count)
+    }
+
+    /// ZIP を展開してスニペットを読み取り、新規と重複に分類する。
+    public func parseImportZip(url: URL) throws -> (new: [SnippetItem], duplicates: [SnippetItem]) {
+        let (newItems, duplicates, tempDir) = try extractAndClassify(zipURL: url)
+        try? FileManager.default.removeItem(at: tempDir)
+        return (new: newItems, duplicates: duplicates)
+    }
+
+    /// ZIP を展開し、新規/重複を分類して返す。tempDir は呼び出し側が削除する。
+    private func extractAndClassify(zipURL: URL) throws -> (new: [SnippetItem], duplicates: [SnippetItem], tempDir: URL) {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent("FuzzyPaste-import-\(UUID().uuidString)")
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        proc.arguments = ["-x", "-k", zipURL.path, tempDir.path]
+        try proc.run()
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else {
+            try? fm.removeItem(at: tempDir)
+            throw NSError(domain: "SnippetStore", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "ZIP ファイルの展開に失敗しました"])
+        }
+
+        let tempAssetsDir = tempDir.appendingPathComponent("assets")
+        let existingIDs = Set(items.map { $0.id })
         var newItems: [SnippetItem] = []
         var duplicates: [SnippetItem] = []
-        for item in imported {
-            let key = duplicateKey(for: item)
-            if existingKeys.contains(key) {
+
+        let mdFiles = (try? fm.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil))?.filter {
+            $0.pathExtension.lowercased() == "md"
+        } ?? []
+
+        for mdURL in mdFiles {
+            guard let content = try? String(contentsOf: mdURL, encoding: .utf8),
+                  let item = SnippetFile.parse(content: content, assetsDir: tempAssetsDir) else {
+                continue
+            }
+            if existingIDs.contains(item.id) {
                 duplicates.append(item)
             } else {
                 newItems.append(item)
             }
         }
-        return (new: newItems, duplicates: duplicates)
+
+        return (new: newItems, duplicates: duplicates, tempDir: tempDir)
     }
 
-    /// JSON ファイルを読み込み、新規と重複に分類して返す。
-    public func parseImportFile(url: URL) throws -> (new: [SnippetItem], duplicates: [SnippetItem]) {
-        let data = try Data(contentsOf: url)
-        return try parseImportData(data)
-    }
-
-    /// スニペットを追加する（新しい UUID を割り当て）。
-    public func importItems(_ newItems: [SnippetItem]) {
-        let reassigned = newItems.map {
-            SnippetItem(title: $0.title, content: $0.content, tags: $0.tags, createdAt: $0.createdAt)
-        }
-        items.insert(contentsOf: reassigned, at: 0)
-        save()
-    }
-
-    /// ファイル名マッピングを適用してスニペットをインポートする（新しい UUID を割り当て）。
-    /// バンドルインポート時に、古いファイル名を新しいファイル名に置き換える。
-    public func importItems(_ newItems: [SnippetItem], fileNameMapping: [String: String]) {
-        let remapped = newItems.map { item -> SnippetItem in
-            let content = item.content.remappingFileName(fileNameMapping)
-            return SnippetItem(id: item.id, title: item.title, content: content, tags: item.tags, createdAt: item.createdAt)
-        }
-        importItems(remapped)
-    }
-
-    /// 重複判定用キーを生成する。
-    private func duplicateKey(for item: SnippetItem) -> String {
+    /// SnippetContent からアセットファイル名を取得する。テキストの場合は nil。
+    private func assetFileName(for item: SnippetItem) -> String? {
         switch item.content {
-        case .text(let text):
-            return "text:\(item.title)\n\(text)"
-        case .image(let meta):
-            return "image:\(item.title)\n\(meta.fileName)"
-        case .file(let meta):
-            return "file:\(item.title)\n\(meta.fileName)"
+        case .image(let meta): return meta.fileName
+        case .file(let meta): return meta.fileName
+        case .text: return nil
         }
     }
 
-    /// JSON ファイルからスニペットを読み込み直す。
-    /// 外部プロセス（CLI 等）による変更を反映するために公開している。
+    /// ディレクトリ内の .md ファイルからスニペットを読み込み直す。
+    /// 外部プロセス（CLI、テキストエディタ等）による変更を反映するために公開している。
     public func reload() {
-        guard let data = try? Data(contentsOf: fileURL) else { return }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        items = (try? decoder.decode([SnippetItem].self, from: data)) ?? []
+        loadAll()
     }
 
-    /// 監視対象の JSON ファイルパスを返す。
-    public var monitoredFileURL: URL { fileURL }
-
-    private func seedDefaults() {
-        items = [
-            SnippetItem(
-                title: "メール返信テンプレート",
-                content: .text("{{相手の名前}}様\n\nお世話になっております。\nよろしくお願いいたします。"),
-                tags: ["first snippet", "mail"]
-            ),
-        ]
-        save()
-    }
-
-    private func load() { reload() }
-
-    private func save() {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(items) else { return }
-        try? data.write(to: fileURL, options: .atomic)
-        lastSaveDate = Date()
-    }
+    /// 監視対象のディレクトリパスを返す。
+    public var monitoredFileURL: URL { snippetsDir }
 
     /// 自分自身の save による変更を無視するためのタイムスタンプ。
     public private(set) var lastSaveDate: Date = .distantPast
+
+    // MARK: - Private
+
+    private func loadAll() {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: snippetsDir, includingPropertiesForKeys: nil) else {
+            items = []
+            fileMap = [:]
+            return
+        }
+
+        var loaded: [SnippetItem] = []
+        var map: [UUID: URL] = [:]
+        var needsIdAssignment: [(SnippetItem, URL)] = []
+
+        for fileURL in files where fileURL.pathExtension.lowercased() == "md" {
+            guard let content = try? String(contentsOf: fileURL, encoding: .utf8),
+                  let item = SnippetFile.parse(content: content, assetsDir: assetsDir) else {
+                continue
+            }
+
+            // frontmatter に id がなかったファイルには UUID を書き戻す
+            let hasId = content.contains("\nid:") || content.hasPrefix("---\nid:")
+            if !hasId {
+                needsIdAssignment.append((item, fileURL))
+            }
+
+            loaded.append(item)
+            map[item.id] = fileURL
+        }
+
+        // id がないファイルに UUID を書き戻し
+        for (item, fileURL) in needsIdAssignment {
+            let serialized = SnippetFile.serialize(item: item)
+            try? serialized.write(to: fileURL, atomically: true, encoding: .utf8)
+        }
+
+        // createdAt 降順（新しい順）でソート
+        items = loaded.sorted { $0.createdAt > $1.createdAt }
+        fileMap = map
+    }
+
+    private func saveItem(_ item: SnippetItem) {
+        let serialized = SnippetFile.serialize(item: item)
+
+        if let existingURL = fileMap[item.id] {
+            // タイトル変更でファイル名が変わる場合はリネーム
+            let desiredName = SnippetFile.uniqueFileName(for: item, in: snippetsDir, excluding: existingURL)
+            let desiredURL = snippetsDir.appendingPathComponent(desiredName)
+
+            if existingURL.lastPathComponent != desiredName {
+                try? FileManager.default.removeItem(at: existingURL)
+                try? serialized.write(to: desiredURL, atomically: true, encoding: .utf8)
+                fileMap[item.id] = desiredURL
+            } else {
+                try? serialized.write(to: existingURL, atomically: true, encoding: .utf8)
+            }
+        } else {
+            // 新規ファイル作成
+            let name = SnippetFile.uniqueFileName(for: item, in: snippetsDir)
+            let fileURL = snippetsDir.appendingPathComponent(name)
+            try? serialized.write(to: fileURL, atomically: true, encoding: .utf8)
+            fileMap[item.id] = fileURL
+        }
+        lastSaveDate = Date()
+    }
+
+    private func seedDefaults() {
+        let item = SnippetItem(
+            title: "メール返信テンプレート",
+            content: .text("{{相手の名前}}様\n\nお世話になっております。\nよろしくお願いいたします。"),
+            tags: ["first snippet", "mail"]
+        )
+        items = [item]
+        saveItem(item)
+    }
+
+    private func isDirectoryEmpty(_ url: URL) -> Bool {
+        let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
+        // assets ディレクトリのみの場合も空とみなす
+        let mdFiles = contents?.filter { $0.pathExtension.lowercased() == "md" }
+        return mdFiles?.isEmpty ?? true
+    }
 }
