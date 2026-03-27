@@ -6,7 +6,7 @@
 
 ## ダウンロード
 
-[![Download app for macOS](Resources/download-macos.svg)](https://github.com/gehnmaisoda/fuzzy-paste/releases/latest)
+[![Download app for macOS](Resources/download-macos.svg)](https://github.com/gehnmaisoda/fuzzy-paste/releases/latest/download/FuzzyPaste.dmg)
 
 > 署名なしのため、初回起動時は .app を右クリック →「開く」で起動してください。
 
